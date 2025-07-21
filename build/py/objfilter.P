@@ -1,0 +1,62 @@
+/home/darrk/casino/build/py/objfilter.o: ../../py/objfilter.c \
+  ../../py/runtime.h ../../py/mpstate.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/alltypes.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/stdint.h \
+  ../../py/mpconfig.h mpconfigport.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/stdlib.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdlib.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/features.h \
+  ../../py/mpthread.h ../../py/misc.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdbool.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdbool.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stddef.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stddef.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_header_macro.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_ptrdiff_t.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_size_t.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_wchar_t.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_null.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_offsetof.h \
+  ../../py/nlr.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/limits.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/limits.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/assert.h \
+  ../../py/obj.h ../../py/qstr.h \
+  /home/darrk/casino/build/genhdr/qstrdefs.generated.h \
+  ../../py/mpprint.h ../../py/runtime0.h ../../py/objlist.h \
+  ../../py/objexcept.h ../../py/objtuple.h \
+  /home/darrk/casino/build/genhdr/root_pointers.h ../../py/pystack.h \
+  ../../py/cstack.h
+../../py/objfilter.c :
+  ../../py/runtime.h ../../py/mpstate.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/alltypes.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/stdint.h :
+  ../../py/mpconfig.h mpconfigport.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/stdlib.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdlib.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/features.h :
+  ../../py/mpthread.h ../../py/misc.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdbool.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdbool.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stddef.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stddef.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_header_macro.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_ptrdiff_t.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_size_t.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_wchar_t.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_null.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_offsetof.h :
+  ../../py/nlr.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/limits.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/limits.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/assert.h :
+  ../../py/obj.h ../../py/qstr.h :
+  /home/darrk/casino/build/genhdr/qstrdefs.generated.h :
+  ../../py/mpprint.h ../../py/runtime0.h ../../py/objlist.h :
+  ../../py/objexcept.h ../../py/objtuple.h :
+  /home/darrk/casino/build/genhdr/root_pointers.h ../../py/pystack.h :
+  ../../py/cstack.h :

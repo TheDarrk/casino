@@ -1,0 +1,40 @@
+/home/darrk/casino/build/py/ringbuf.o: ../../py/ringbuf.c \
+  ../../py/ringbuf.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stddef.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stddef.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_header_macro.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_ptrdiff_t.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_size_t.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_wchar_t.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_null.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_offsetof.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/alltypes.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/string.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/string.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/features.h \
+  ../../py/mpconfig.h mpconfigport.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/stdlib.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdlib.h
+../../py/ringbuf.c :
+  ../../py/ringbuf.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stddef.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stddef.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_header_macro.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_ptrdiff_t.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_size_t.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_wchar_t.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_null.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_offsetof.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/alltypes.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/string.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/string.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/features.h :
+  ../../py/mpconfig.h mpconfigport.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/stdlib.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdlib.h :

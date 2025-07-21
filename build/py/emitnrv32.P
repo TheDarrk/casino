@@ -1,0 +1,18 @@
+/home/darrk/casino/build/py/emitnrv32.o: ../../py/emitnrv32.c \
+  ../../py/mpconfig.h mpconfigport.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/alltypes.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/stdlib.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdlib.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/features.h
+../../py/emitnrv32.c :
+  ../../py/mpconfig.h mpconfigport.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/alltypes.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/stdlib.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdlib.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/features.h :

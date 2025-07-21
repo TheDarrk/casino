@@ -1,0 +1,100 @@
+/home/darrk/casino/build/py/runtime.o: ../../py/runtime.c \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/assert.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/features.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/stdarg.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdarg.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdarg.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stdarg_header_macro.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stdarg___gnuc_va_list.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stdarg_va_list.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stdarg_va_arg.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stdarg___va_copy.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stdarg_va_copy.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdio.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/wasi/api.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stddef.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stddef.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_header_macro.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_ptrdiff_t.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_size_t.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_wchar_t.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_null.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_offsetof.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/alltypes.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/string.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/string.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/unistd.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/posix.h \
+  ../../py/parsenum.h ../../py/mpconfig.h mpconfigport.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/stdlib.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdlib.h \
+  ../../py/lexer.h ../../py/qstr.h ../../py/misc.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdbool.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdbool.h \
+  ../../py/nlr.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/limits.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/limits.h \
+  /home/darrk/casino/build/genhdr/qstrdefs.generated.h ../../py/reader.h \
+  ../../py/obj.h ../../py/mpprint.h ../../py/runtime0.h \
+  ../../py/compile.h ../../py/parse.h ../../py/emitglue.h ../../py/bc.h \
+  ../../py/runtime.h ../../py/mpstate.h ../../py/mpthread.h \
+  ../../py/objlist.h ../../py/objexcept.h ../../py/objtuple.h \
+  /home/darrk/casino/build/genhdr/root_pointers.h ../../py/pystack.h \
+  ../../py/cstack.h ../../py/objstr.h ../../py/objarray.h \
+  ../../py/objtype.h ../../py/objmodule.h \
+  /home/darrk/casino/build/genhdr/moduledefs.h ../../py/objgenerator.h \
+  ../../py/smallint.h ../../py/stream.h ../../py/mperrno.h \
+  ../../py/builtin.h ../../py/gc.h
+../../py/runtime.c :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/assert.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/features.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/stdarg.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdarg.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdarg.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stdarg_header_macro.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stdarg___gnuc_va_list.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stdarg_va_list.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stdarg_va_arg.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stdarg___va_copy.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stdarg_va_copy.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdio.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/wasi/api.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stddef.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stddef.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_header_macro.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_ptrdiff_t.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_size_t.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_wchar_t.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_null.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_offsetof.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/alltypes.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/string.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/string.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/unistd.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/posix.h :
+  ../../py/parsenum.h ../../py/mpconfig.h mpconfigport.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/stdlib.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdlib.h :
+  ../../py/lexer.h ../../py/qstr.h ../../py/misc.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdbool.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdbool.h :
+  ../../py/nlr.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/limits.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/limits.h :
+  /home/darrk/casino/build/genhdr/qstrdefs.generated.h ../../py/reader.h :
+  ../../py/obj.h ../../py/mpprint.h ../../py/runtime0.h :
+  ../../py/compile.h ../../py/parse.h ../../py/emitglue.h ../../py/bc.h :
+  ../../py/runtime.h ../../py/mpstate.h ../../py/mpthread.h :
+  ../../py/objlist.h ../../py/objexcept.h ../../py/objtuple.h :
+  /home/darrk/casino/build/genhdr/root_pointers.h ../../py/pystack.h :
+  ../../py/cstack.h ../../py/objstr.h ../../py/objarray.h :
+  ../../py/objtype.h ../../py/objmodule.h :
+  /home/darrk/casino/build/genhdr/moduledefs.h ../../py/objgenerator.h :
+  ../../py/smallint.h ../../py/stream.h ../../py/mperrno.h :
+  ../../py/builtin.h ../../py/gc.h :

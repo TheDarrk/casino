@@ -1,0 +1,30 @@
+/home/darrk/casino/build/cmp.o: cmp.c cmp.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdbool.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdbool.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stddef.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stddef.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_header_macro.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_ptrdiff_t.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_size_t.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_wchar_t.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_null.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_offsetof.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/alltypes.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/stdint.h
+cmp.c cmp.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdbool.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdbool.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stddef.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stddef.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_header_macro.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_ptrdiff_t.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_size_t.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_wchar_t.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_null.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/__stddef_offsetof.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/alltypes.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/stdint.h :

@@ -1,0 +1,17 @@
+/home/darrk/casino/build/extmod/modcryptolib.o: \
+  ../../extmod/modcryptolib.c ../../py/mpconfig.h mpconfigport.h \
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/alltypes.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/stdint.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/stdlib.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdlib.h \
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/features.h
+  ../../extmod/modcryptolib.c ../../py/mpconfig.h mpconfigport.h :
+  /home/darrk/emsdk/upstream/lib/clang/21/include/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/alltypes.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/bits/stdint.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/compat/stdlib.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/stdlib.h :
+  /home/darrk/emsdk/upstream/emscripten/cache/sysroot/include/features.h :
