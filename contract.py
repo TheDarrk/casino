@@ -1,11 +1,11 @@
-from near_sdk import NearBindgen, call, view, AccountId, env, Promise
-from near_sdk.collections import LookupMap, UnorderedSet
+from near_sdk_py import NearBindgen, call, view, AccountId, env, Promise, init, contract
+from near_sdk_py.collections import LookupMap, UnorderedSet
 from typing import List
 
 @NearBindgen
-class NoLossCasino:
+class NoLossCasino(contract):
     # Initialization method (call this after deployment)
-    @call
+    @init
     def init(self):
         """Initialize contract state - call once after deployment"""
         assert not hasattr(self, 'owner'), "Contract already initialized"
