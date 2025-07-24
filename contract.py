@@ -1,153 +1,291 @@
-from near_sdk_py import NearBindgen, call, view, AccountId, env, Promise, init, contract
-from near_sdk_py.collections import LookupMap, UnorderedSet
-from typing import List
 
-@NearBindgen
-class NoLossCasino(contract):
-    # Initialization method (call this after deployment)
+from near_sdk_py import Contract, call, view, init, ONE_NEAR
+from typing import Dict, List, Optional
+import json
+
+class TeamBettingContract(Contract):
+    """
+    A team-based betting contract where:
+    - Two teams compete for points
+    - Users bet NEAR tokens on teams
+    - Points are awarded based on deposit time (early = more points)
+    - Admin sets pot size and commission
+    - Winners share the pot proportionally based on points
+    - Losers get partial refund after deducting pot + commission
+    """
+
     @init
-    def init(self):
-        """Initialize contract state - call once after deployment"""
-        assert not hasattr(self, 'owner'), "Contract already initialized"
-        self.owner = env.predecessor_account_id()
-        self.entry_fee = 10**24  # 1 NEAR in yoctoNEAR
-        self.winners_count = 10
-        self.prize_per_winner = 10 * 10**24  # 10 NEAR
-        self.house_fee_percent = 20
-        self.min_players = 120
-        self.players = UnorderedSet("players")
-        self.payouts = LookupMap("payouts")
-        self.game_active = True
-        env.log("Contract initialized successfully")
+    def initialize(self, admin_id: str):
+        """Initialize the contract with admin"""
+        self.storage["admin"] = admin_id
+        self.storage["game_active"] = False
+        self.storage["game_started"] = False
+        self.storage["game_start_time"] = 0
+        self.storage["pot_size"] = 0
+        self.storage["commission_rate"] = 10  # 10% default
+        self.storage["team_a_bets"] = {}
+        self.storage["team_b_bets"] = {}
+        self.storage["team_a_points"] = 0
+        self.storage["team_b_points"] = 0
+        self.storage["winning_team"] = ""
+        self.storage["point_rates"] = [24, 23, 22, 21, 20, 19, 18, 17, 16, 15]  # Points per NEAR for each hour
+
+    def assert_admin(self):
+        """Ensure only admin can call this function"""
+        admin = self.storage.get("admin")
+        if self.predecessor_account_id != admin:
+            raise Exception("Only admin can call this function")
 
     @call
-    def join_game(self):
-        """Players enter the game by paying 1 NEAR"""
-        assert self.game_active, "Game is closed"
-        assert env.attached_deposit() == self.entry_fee, "Pay exactly 1 NEAR"
-        player = env.predecessor_account_id()
-        assert not self.players.contains(player), "Already joined"
-        self.players.add(player)
-        env.log(f"Player {player} joined. Total players: {self.players.len()}")
+    def set_pot_size(self, pot_size: int):
+        """Admin sets the winning pot size in NEAR tokens"""
+        self.assert_admin()
+        if self.storage.get("game_active"):
+            raise Exception("Cannot change pot size during active game")
+
+        self.storage["pot_size"] = pot_size
+        self.log_event("pot_size_set", {"pot_size": pot_size})
 
     @call
-    def resolve_game(self):
-        """Owner closes the game and calculates payouts"""
-        assert env.predecessor_account_id() == self.owner, "Owner only"
-        assert self.players.len() >= self.min_players, f"Minimum {self.min_players} players required"
+    def set_commission_rate(self, rate: int):
+        """Admin sets commission rate (percentage)"""
+        self.assert_admin()
+        if rate < 0 or rate > 50:
+            raise Exception("Commission rate must be between 0 and 50 percent")
 
-        # Calculate financials
-        total_pot = self.players.len() * self.entry_fee
-        house_fee = (total_pot * self.house_fee_percent) // 100
-        net_pot = total_pot - house_fee
-        
-        # Select winners using secure method
-        winners = self._select_winners()
-        
-        # Distribute prizes to winners
-        winner_amount = self.prize_per_winner
-        for winner in winners:
-            self.payouts[winner] = winner_amount
-        
-        # Calculate refunds with remainder handling
-        refund_pool = net_pot - (self.winners_count * winner_amount)
-        non_winners_count = self.players.len() - self.winners_count
-        
-        if non_winners_count > 0:
-            refund_per_player = refund_pool // non_winners_count
-            remainder = refund_pool % non_winners_count
-            
-            # Distribute refunds
-            non_winners = [p for p in self.players.to_list() if p not in winners]
-            for player in non_winners:
-                self.payouts[player] = refund_per_player
-            
-            # Add remainder to last non-winner to avoid dust loss
-            if remainder > 0:
-                self.payouts[non_winners[-1]] += remainder
+        self.storage["commission_rate"] = rate
+        self.log_event("commission_rate_set", {"rate": rate})
+
+    @call
+    def start_game(self):
+        """Admin starts the betting game"""
+        self.assert_admin()
+        if self.storage.get("game_active"):
+            raise Exception("Game already active")
+
+        pot_size = self.storage.get("pot_size", 0)
+        if pot_size <= 0:
+            raise Exception("Pot size must be set first")
+
+        self.storage["game_active"] = True
+        self.storage["game_started"] = True
+        self.storage["game_start_time"] = self.block_timestamp
+        self.storage["team_a_bets"] = {}
+        self.storage["team_b_bets"] = {}
+        self.storage["team_a_points"] = 0
+        self.storage["team_b_points"] = 0
+        self.storage["winning_team"] = ""
+
+        self.log_event("game_started", {
+            "pot_size": pot_size,
+            "start_time": self.block_timestamp
+        })
+
+    @call
+    def bet_on_team(self, team: str):
+        """User bets NEAR tokens on a team (A or B)"""
+        if not self.storage.get("game_active"):
+            raise Exception("No active game")
+
+        if team not in ["A", "B"]:
+            raise Exception("Team must be 'A' or 'B'")
+
+        if self.attached_deposit == 0:
+            raise Exception("Must attach NEAR tokens to bet")
+
+        user_id = self.predecessor_account_id
+        bet_amount = self.attached_deposit
+
+        # Calculate points based on time elapsed since game start
+        time_elapsed = self.block_timestamp - self.storage.get("game_start_time", 0)
+        hours_elapsed = time_elapsed // (60 * 60 * 1000000000)  # Convert nanoseconds to hours
+
+        # Get point rate (24 points for first hour, then decreasing)
+        if hours_elapsed >= len(self.storage.get("point_rates", [])):
+            point_rate = 1  # Minimum 1 point per NEAR
         else:
-            # Handle case where all players are winners
-            remainder = refund_pool
-        
-        self.game_active = False
-        Promise(self.owner).transfer(house_fee + remainder)
-        env.log(f"Game resolved. Winners: {len(winners)}")
+            point_rate = self.storage.get("point_rates", [])[int(hours_elapsed)]
 
-    def _select_winners(self) -> List[AccountId]:
-        """Secure winner selection using cryptographic hashing"""
-        # Create unpredictable seed
-        seed = (
-            env.block_timestamp().to_bytes(8, 'big') + 
-            env.block_hash() + 
-            env.predecessor_account_id().encode()
-        )
-        
-        players = self.players.to_list()
-        winners = []
-        
-        # Generate winner indices using SHA256 chain
-        for _ in range(self.winners_count):
-            # Create new hash for each selection
-            seed = env.sha256(seed)
-            # Convert hash to integer index
-            idx = int.from_bytes(seed, 'big') % len(players)
-            
-            # Add unique winner
-            winner = players[idx]
-            while winner in winners:
-                seed = env.sha256(seed)
-                idx = int.from_bytes(seed, 'big') % len(players)
-                winner = players[idx]
-                
-            winners.append(winner)
-        
-        return winners
+        points_earned = (bet_amount // ONE_NEAR) * point_rate
+
+        # Store bet information
+        team_key = f"team_{team.lower()}_bets"
+        team_bets = self.storage.get(team_key, {})
+
+        if user_id in team_bets:
+            # Add to existing bet
+            existing_bet = team_bets[user_id]
+            team_bets[user_id] = {
+                "amount": existing_bet["amount"] + bet_amount,
+                "points": existing_bet["points"] + points_earned
+            }
+        else:
+            # New bet
+            team_bets[user_id] = {
+                "amount": bet_amount,
+                "points": points_earned
+            }
+
+        self.storage[team_key] = team_bets
+
+        # Update team total points
+        points_key = f"team_{team.lower()}_points"
+        current_points = self.storage.get(points_key, 0)
+        self.storage[points_key] = current_points + points_earned
+
+        self.log_event("bet_placed", {
+            "user": user_id,
+            "team": team,
+            "amount": bet_amount,
+            "points": points_earned,
+            "point_rate": point_rate
+        })
 
     @call
-    def claim_payout(self):
-        """Players withdraw their winnings/refunds"""
-        player = env.predecessor_account_id()
-        amount = self.payouts.get(player, 0)
-        assert amount > 0, "No payout available"
-        
-        # Prevent reentrancy: clear state BEFORE transfer
-        del self.payouts[player]
-        Promise(player).transfer(amount)
-        env.log(f"Paid {amount/10**24} NEAR to {player}")
+    def end_game(self):
+        """Admin ends the game and determines winner"""
+        self.assert_admin()
+        if not self.storage.get("game_active"):
+            raise Exception("No active game")
+
+        team_a_points = self.storage.get("team_a_points", 0)
+        team_b_points = self.storage.get("team_b_points", 0)
+
+        if team_a_points == team_b_points:
+            raise Exception("Cannot end game with tie score")
+
+        winning_team = "A" if team_a_points > team_b_points else "B"
+        self.storage["winning_team"] = winning_team
+        self.storage["game_active"] = False
+
+        self.log_event("game_ended", {
+            "winning_team": winning_team,
+            "team_a_points": team_a_points,
+            "team_b_points": team_b_points
+        })
+
+        # Trigger payout distribution
+        self._distribute_payouts()
+
+    def _distribute_payouts(self):
+        """Internal function to distribute payouts to winners and losers"""
+        winning_team = self.storage.get("winning_team")
+        pot_size = self.storage.get("pot_size", 0) * ONE_NEAR
+        commission_rate = self.storage.get("commission_rate", 10)
+
+        winning_team_key = f"team_{winning_team.lower()}_bets"
+        losing_team_key = f"team_{'a' if winning_team == 'B' else 'b'}_bets"
+
+        winning_bets = self.storage.get(winning_team_key, {})
+        losing_bets = self.storage.get(losing_team_key, {})
+
+        # Calculate total amounts
+        winning_total_amount = sum(bet["amount"] for bet in winning_bets.values())
+        losing_total_amount = sum(bet["amount"] for bet in losing_bets.values())
+
+        # Calculate total points for proportional distribution
+        winning_total_points = sum(bet["points"] for bet in winning_bets.values())
+
+        # Calculate commission
+        commission_amount = (pot_size * commission_rate) // 100
+        net_pot = pot_size - commission_amount
+
+        # Distribute to winners
+        for user_id, bet_info in winning_bets.items():
+            # User gets their original bet back
+            user_payout = bet_info["amount"]
+
+            # Plus proportional share of the pot
+            if winning_total_points > 0:
+                pot_share = (bet_info["points"] * net_pot) // winning_total_points
+                user_payout += pot_share
+
+            # Transfer to user (in real implementation, this would be a promise)
+            self.log_event("winner_payout", {
+                "user": user_id,
+                "original_bet": bet_info["amount"],
+                "pot_share": pot_share if winning_total_points > 0 else 0,
+                "total_payout": user_payout
+            })
+
+        # Calculate what losers need to pay and what they get back
+        total_to_pay = pot_size + commission_amount
+
+        if losing_total_amount >= total_to_pay:
+            # Losers can cover the pot + commission
+            for user_id, bet_info in losing_bets.items():
+                # Calculate proportional loss
+                user_loss = (bet_info["amount"] * total_to_pay) // losing_total_amount
+                user_refund = bet_info["amount"] - user_loss
+
+                self.log_event("loser_payout", {
+                    "user": user_id,
+                    "original_bet": bet_info["amount"],
+                    "loss": user_loss,
+                    "refund": user_refund
+                })
+        else:
+            # Losers lose everything (rare case)
+            for user_id, bet_info in losing_bets.items():
+                self.log_event("loser_payout", {
+                    "user": user_id,
+                    "original_bet": bet_info["amount"],
+                    "loss": bet_info["amount"],
+                    "refund": 0
+                })
+
+        # Pay commission to admin
+        admin = self.storage.get("admin")
+        self.log_event("commission_payout", {
+            "admin": admin,
+            "commission": commission_amount
+        })
 
     @view
-    def get_players_count(self) -> int:
-        """Get total number of players"""
-        return self.players.len()
+    def get_game_status(self) -> Dict:
+        """Get current game status"""
+        return {
+            "active": self.storage.get("game_active", False),
+            "started": self.storage.get("game_started", False),
+            "start_time": self.storage.get("game_start_time", 0),
+            "pot_size": self.storage.get("pot_size", 0),
+            "commission_rate": self.storage.get("commission_rate", 10),
+            "team_a_points": self.storage.get("team_a_points", 0),
+            "team_b_points": self.storage.get("team_b_points", 0),
+            "winning_team": self.storage.get("winning_team", "")
+        }
 
     @view
-    def get_payout_amount(self, account_id: AccountId) -> int:
-        """Check payout amount for an account"""
-        return self.payouts.get(account_id, 0)
+    def get_team_bets(self, team: str) -> Dict:
+        """Get all bets for a specific team"""
+        if team not in ["A", "B"]:
+            return {}
 
-    @call
-    def change_owner(self, new_owner: AccountId):
-        """Transfer contract ownership"""
-        assert env.predecessor_account_id() == self.owner, "Owner only"
-        self.owner = new_owner
+        team_key = f"team_{team.lower()}_bets"
+        return self.storage.get(team_key, {})
 
-    @call
-    def emergency_withdraw(self):
-        """Recover funds after game ends (owner only)"""
-        assert env.predecessor_account_id() == self.owner, "Owner only"
-        assert not self.game_active, "Game still active"
-        balance = env.account_balance()
-        # Leave 5 NEAR for contract storage
-        withdrawable = balance - 5 * 10**24
-        assert withdrawable > 0, "Insufficient balance"
-        Promise(self.owner).transfer(withdrawable)
+    @view
+    def get_user_bet(self, user_id: str, team: str) -> Dict:
+        """Get a specific user's bet on a team"""
+        if team not in ["A", "B"]:
+            return {}
 
-    @call
-    def reset_game(self):
-        """Start a new game (owner only)"""
-        assert env.predecessor_account_id() == self.owner, "Owner only"
-        assert not self.game_active, "Game still running"
-        self.players.clear()
-        self.payouts.clear()
-        self.game_active = True
-        env.log("New game started")
+        team_key = f"team_{team.lower()}_bets"
+        team_bets = self.storage.get(team_key, {})
+        return team_bets.get(user_id, {})
+
+    @view
+    def calculate_current_points(self, amount_near: int) -> int:
+        """Calculate points that would be earned for betting now"""
+        if not self.storage.get("game_active"):
+            return 0
+
+        time_elapsed = self.block_timestamp - self.storage.get("game_start_time", 0)
+        hours_elapsed = time_elapsed // (60 * 60 * 1000000000)
+
+        if hours_elapsed >= len(self.storage.get("point_rates", [])):
+            point_rate = 1
+        else:
+            point_rate = self.storage.get("point_rates", [])[int(hours_elapsed)]
+
+        return amount_near * point_rate
