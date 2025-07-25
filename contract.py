@@ -1,4 +1,3 @@
-
 from near_sdk_py import Contract, call, view, init, ONE_NEAR
 from typing import Dict, List, Optional
 import json
@@ -9,9 +8,10 @@ class TeamBettingContract(Contract):
     - Two teams compete for points
     - Users bet NEAR tokens on teams
     - Points are awarded based on deposit time (early = more points)
-    - Admin sets pot size and commission
+    - Admin sets pot size, commission, and game duration
     - Winners share the pot proportionally based on points
-    - Losers get partial refund after deducting pot + commission
+    - Losers get partial refund after deducting pot + commission (based on NEAR bet amount)
+    - Admin can pause/unpause and force refund games
     """
 
     @init
@@ -23,6 +23,9 @@ class TeamBettingContract(Contract):
         self.storage["game_start_time"] = 0
         self.storage["pot_size"] = 0
         self.storage["commission_rate"] = 10  # 10% default
+        self.storage["game_duration"] = 3600  # 1 hour default (in seconds)
+        self.storage["paused"] = False  # NEW: Pause functionality
+        self.storage["force_refund_mode"] = False  # NEW: Force refund mode
         self.storage["team_a_bets"] = {}
         self.storage["team_b_bets"] = {}
         self.storage["team_a_points"] = 0
@@ -36,10 +39,46 @@ class TeamBettingContract(Contract):
         if self.predecessor_account_id != admin:
             raise Exception("Only admin can call this function")
 
+    def assert_not_paused(self):
+        """Ensure contract is not paused"""
+        if self.storage.get("paused", False):
+            raise Exception("Contract is paused")
+
+    # NEW: Pause and Unpause Functions
+    @call
+    def pause_game(self):
+        """Admin can pause the contract - no functions will work until unpaused"""
+        self.assert_admin()
+        self.storage["paused"] = True
+        self.log_event("game_paused", {"admin": self.predecessor_account_id})
+
+    @call
+    def unpause_game(self):
+        """Admin can unpause the contract"""
+        self.assert_admin()
+        self.storage["paused"] = False
+        self.log_event("game_unpaused", {"admin": self.predecessor_account_id})
+
+    # NEW: Set Game Duration
+    @call
+    def set_game_duration(self, duration_seconds: int):
+        """Admin sets game duration in seconds (10min=600, 30min=1800, 1hr=3600, 2hr=7200, 24hr=86400, 36hr=129600)"""
+        self.assert_admin()
+        self.assert_not_paused()
+        if self.storage.get("game_active"):
+            raise Exception("Cannot change game duration during active game")
+        
+        if duration_seconds < 60:  # Minimum 1 minute
+            raise Exception("Game duration must be at least 60 seconds")
+            
+        self.storage["game_duration"] = duration_seconds
+        self.log_event("game_duration_set", {"duration_seconds": duration_seconds})
+
     @call
     def set_pot_size(self, pot_size: int):
         """Admin sets the winning pot size in NEAR tokens"""
         self.assert_admin()
+        self.assert_not_paused()
         if self.storage.get("game_active"):
             raise Exception("Cannot change pot size during active game")
 
@@ -50,6 +89,10 @@ class TeamBettingContract(Contract):
     def set_commission_rate(self, rate: int):
         """Admin sets commission rate (percentage)"""
         self.assert_admin()
+        self.assert_not_paused()
+        if self.storage.get("game_active"):
+            raise Exception("Cannot change commission rate during active game")
+            
         if rate < 0 or rate > 50:
             raise Exception("Commission rate must be between 0 and 50 percent")
 
@@ -60,6 +103,7 @@ class TeamBettingContract(Contract):
     def start_game(self):
         """Admin starts the betting game"""
         self.assert_admin()
+        self.assert_not_paused()
         if self.storage.get("game_active"):
             raise Exception("Game already active")
 
@@ -70,6 +114,7 @@ class TeamBettingContract(Contract):
         self.storage["game_active"] = True
         self.storage["game_started"] = True
         self.storage["game_start_time"] = self.block_timestamp
+        self.storage["force_refund_mode"] = False
         self.storage["team_a_bets"] = {}
         self.storage["team_b_bets"] = {}
         self.storage["team_a_points"] = 0
@@ -78,14 +123,19 @@ class TeamBettingContract(Contract):
 
         self.log_event("game_started", {
             "pot_size": pot_size,
-            "start_time": self.block_timestamp
+            "start_time": self.block_timestamp,
+            "duration": self.storage.get("game_duration", 3600)
         })
 
     @call
     def bet_on_team(self, team: str):
         """User bets NEAR tokens on a team (A or B)"""
+        self.assert_not_paused()
         if not self.storage.get("game_active"):
             raise Exception("No active game")
+            
+        if self.storage.get("force_refund_mode", False):
+            raise Exception("Game is in refund mode - betting disabled")
 
         if team not in ["A", "B"]:
             raise Exception("Team must be 'A' or 'B'")
@@ -141,10 +191,57 @@ class TeamBettingContract(Contract):
             "point_rate": point_rate
         })
 
+    # NEW: Force End Game with Full Refunds
+    @call
+    def force_end_game_refund(self):
+        """Admin ends the game and everyone gets their original NEAR amount back without any deduction"""
+        self.assert_admin()
+        self.assert_not_paused()
+        if not self.storage.get("game_active"):
+            raise Exception("No active game")
+
+        self.storage["game_active"] = False
+        self.storage["force_refund_mode"] = True
+        
+        # Log all refunds
+        team_a_bets = self.storage.get("team_a_bets", {})
+        team_b_bets = self.storage.get("team_b_bets", {})
+        
+        total_refunded = 0
+        
+        # Process Team A refunds
+        for user_id, bet_info in team_a_bets.items():
+            refund_amount = bet_info["amount"]
+            total_refunded += refund_amount
+            self.log_event("force_refund", {
+                "user": user_id,
+                "team": "A",
+                "refund_amount": refund_amount,
+                "original_bet": bet_info["amount"]
+            })
+
+        # Process Team B refunds  
+        for user_id, bet_info in team_b_bets.items():
+            refund_amount = bet_info["amount"]
+            total_refunded += refund_amount
+            self.log_event("force_refund", {
+                "user": user_id,
+                "team": "B", 
+                "refund_amount": refund_amount,
+                "original_bet": bet_info["amount"]
+            })
+
+        self.log_event("game_force_ended", {
+            "admin": self.predecessor_account_id,
+            "total_refunded": total_refunded,
+            "refund_mode": True
+        })
+
     @call
     def end_game(self):
         """Admin ends the game and determines winner"""
         self.assert_admin()
+        self.assert_not_paused()
         if not self.storage.get("game_active"):
             raise Exception("No active game")
 
@@ -168,7 +265,7 @@ class TeamBettingContract(Contract):
         self._distribute_payouts()
 
     def _distribute_payouts(self):
-        """Internal function to distribute payouts to winners and losers"""
+        """Internal function to distribute payouts to winners and losers - UPDATED: Loss calculation by NEAR amount"""
         winning_team = self.storage.get("winning_team")
         pot_size = self.storage.get("pot_size", 0) * ONE_NEAR
         commission_rate = self.storage.get("commission_rate", 10)
@@ -183,24 +280,23 @@ class TeamBettingContract(Contract):
         winning_total_amount = sum(bet["amount"] for bet in winning_bets.values())
         losing_total_amount = sum(bet["amount"] for bet in losing_bets.values())
 
-        # Calculate total points for proportional distribution
+        # Calculate total points for proportional distribution (winners only)
         winning_total_points = sum(bet["points"] for bet in winning_bets.values())
 
         # Calculate commission
         commission_amount = (pot_size * commission_rate) // 100
-        net_pot = pot_size - commission_amount
+        total_to_pay = pot_size + commission_amount  # Total that losing side must cover
 
-        # Distribute to winners
+        # Distribute to winners (based on points for pot distribution)
         for user_id, bet_info in winning_bets.items():
             # User gets their original bet back
             user_payout = bet_info["amount"]
 
-            # Plus proportional share of the pot
+            # Plus proportional share of the pot (based on points)
             if winning_total_points > 0:
-                pot_share = (bet_info["points"] * net_pot) // winning_total_points
+                pot_share = (bet_info["points"] * pot_size) // winning_total_points
                 user_payout += pot_share
 
-            # Transfer to user (in real implementation, this would be a promise)
             self.log_event("winner_payout", {
                 "user": user_id,
                 "original_bet": bet_info["amount"],
@@ -208,13 +304,11 @@ class TeamBettingContract(Contract):
                 "total_payout": user_payout
             })
 
-        # Calculate what losers need to pay and what they get back
-        total_to_pay = pot_size + commission_amount
-
+        # UPDATED: Calculate what losers pay and get back (based on NEAR bet amount, NOT points)
         if losing_total_amount >= total_to_pay:
             # Losers can cover the pot + commission
             for user_id, bet_info in losing_bets.items():
-                # Calculate proportional loss
+                # Calculate proportional loss based on NEAR bet amount
                 user_loss = (bet_info["amount"] * total_to_pay) // losing_total_amount
                 user_refund = bet_info["amount"] - user_loss
 
@@ -222,7 +316,8 @@ class TeamBettingContract(Contract):
                     "user": user_id,
                     "original_bet": bet_info["amount"],
                     "loss": user_loss,
-                    "refund": user_refund
+                    "refund": user_refund,
+                    "loss_calculation": "based_on_near_amount"
                 })
         else:
             # Losers lose everything (rare case)
@@ -231,7 +326,8 @@ class TeamBettingContract(Contract):
                     "user": user_id,
                     "original_bet": bet_info["amount"],
                     "loss": bet_info["amount"],
-                    "refund": 0
+                    "refund": 0,
+                    "loss_calculation": "total_loss"
                 })
 
         # Pay commission to admin
@@ -241,15 +337,36 @@ class TeamBettingContract(Contract):
             "commission": commission_amount
         })
 
+    # NEW: Withdraw function for users to claim their payouts/refunds
+    @call
+    def withdraw(self):
+        """Users can withdraw their winnings or refunds after game ends"""
+        self.assert_not_paused()
+        user_id = self.predecessor_account_id
+        
+        if self.storage.get("game_active", False):
+            raise Exception("Cannot withdraw during active game")
+            
+        # Check if user has any winnings/refunds to claim
+        # This would typically involve checking event logs or a separate withdrawal mapping
+        # For now, we'll log the withdrawal attempt
+        self.log_event("withdrawal_attempt", {
+            "user": user_id,
+            "timestamp": self.block_timestamp
+        })
+
     @view
     def get_game_status(self) -> Dict:
-        """Get current game status"""
+        """Get current game status - UPDATED with new fields"""
         return {
             "active": self.storage.get("game_active", False),
             "started": self.storage.get("game_started", False),
+            "paused": self.storage.get("paused", False),  # NEW
+            "force_refund_mode": self.storage.get("force_refund_mode", False),  # NEW
             "start_time": self.storage.get("game_start_time", 0),
             "pot_size": self.storage.get("pot_size", 0),
             "commission_rate": self.storage.get("commission_rate", 10),
+            "game_duration": self.storage.get("game_duration", 3600),  # NEW
             "team_a_points": self.storage.get("team_a_points", 0),
             "team_b_points": self.storage.get("team_b_points", 0),
             "winning_team": self.storage.get("winning_team", "")
@@ -289,3 +406,14 @@ class TeamBettingContract(Contract):
             point_rate = self.storage.get("point_rates", [])[int(hours_elapsed)]
 
         return amount_near * point_rate
+
+    @view
+    def get_admin_info(self) -> Dict:
+        """Get admin and contract configuration info"""
+        return {
+            "admin": self.storage.get("admin", ""),
+            "paused": self.storage.get("paused", False),
+            "pot_size": self.storage.get("pot_size", 0),
+            "commission_rate": self.storage.get("commission_rate", 10),
+            "game_duration": self.storage.get("game_duration", 3600)
+        }
