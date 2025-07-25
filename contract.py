@@ -1,291 +1,291 @@
-from typing import Dict, Optional
-from near_sdk_py import Contract, call, view, init, env, Panic
-from near_sdk_py.collections import LookupMap, UnorderedSet
-from near_sdk_py.constants import ONE_NEAR, ONE_TGAS
-from near_sdk_py.promises import Promise
 
-MIN_BET = int(0.5 * ONE_NEAR)          # 0.5 Ⓝ
-MAX_GAS = 300 * ONE_TGAS               # 300 TGas hard protocol limit
-
-
-class BetInfo:
-    """Lightweight record stored per bettor inside a LookupMap."""
-    def __init__(self, amount: int, points: int, team: str):
-        self.amount       = amount        # yoctoⓃ staked
-        self.points       = points        # points earned
-        self.team         = team          # "A" | "B"
-        self.withdrawable = 0             # yoctoⓃ claimable after settlement
-
-    def to_dict(self):
-        return {
-            "amount":       self.amount,
-            "points":       self.points,
-            "team":         self.team,
-            "withdrawable": self.withdrawable,
-        }
-
+from near_sdk_py import Contract, call, view, init, ONE_NEAR
+from typing import Dict, List, Optional
+import json
 
 class TeamBettingContract(Contract):
-    # ───────────────────────── INITIALISATION ────────────────────────────
+    """
+    A team-based betting contract where:
+    - Two teams compete for points
+    - Users bet NEAR tokens on teams
+    - Points are awarded based on deposit time (early = more points)
+    - Admin sets pot size and commission
+    - Winners share the pot proportionally based on points
+    - Losers get partial refund after deducting pot + commission
+    """
+
     @init
     def initialize(self, admin_id: str):
-        self.storage["admin"]             = admin_id
-        self.storage["paused"]            = False
-        self.storage["game_active"]       = False
-        self.storage["game_start_time"]   = 0                # nanoseconds
-        self.storage["pot_size"]          = 0                # whole Ⓝ
-        self.storage["commission_rate"]   = 0                # %
-        self.storage["game_duration"]     = 3600             # seconds
-        self.storage["force_refund_mode"] = False
-        self.storage["winning_team"]      = ""
+        """Initialize the contract with admin"""
+        self.storage["admin"] = admin_id
+        self.storage["game_active"] = False
+        self.storage["game_started"] = False
+        self.storage["game_start_time"] = 0
+        self.storage["pot_size"] = 0
+        self.storage["commission_rate"] = 10  # 10% default
+        self.storage["team_a_bets"] = {}
+        self.storage["team_b_bets"] = {}
+        self.storage["team_a_points"] = 0
+        self.storage["team_b_points"] = 0
+        self.storage["winning_team"] = ""
+        self.storage["point_rates"] = [24, 23, 22, 21, 20, 19, 18, 17, 16, 15]  # Points per NEAR for each hour
 
-        # team aggregates (yoctoⓃ / pts)
-        self.storage["team_a_total"]      = 0
-        self.storage["team_b_total"]      = 0
-        self.storage["team_a_points"]     = 0
-        self.storage["team_b_points"]     = 0
-
-        # stateful collections
-        self.bets   = LookupMap("b")                        # acc → BetInfo
-        self.banned = UnorderedSet("x")                     # banned accounts
-
-        # linear decay table: 24 → 1 pt/Ⓝ
-        self.point_rates = [max(1, 24 - i) for i in range(24)]
-
-    # ──────────────────────────── GUARDS ─────────────────────────────────
-    def _admin_only(self):
-        if env.predecessor_account_id != self.storage["admin"]:
-            raise Panic("Admin only")
-
-    def _not_paused(self):
-        if self.storage["paused"]:
-            raise Panic("Contract paused")
-
-    def _not_banned(self, account: str):
-        if self.banned.contains(account):
-            raise Panic("Account is banned")
-
-    # ─────────────────────────── ADMIN OPS ───────────────────────────────
-    @call
-    def pause_game(self):
-        self._admin_only()
-        self.storage["paused"] = True
-
-    @call
-    def unpause_game(self):
-        self._admin_only()
-        self.storage["paused"] = False
+    def assert_admin(self):
+        """Ensure only admin can call this function"""
+        admin = self.storage.get("admin")
+        if self.predecessor_account_id != admin:
+            raise Exception("Only admin can call this function")
 
     @call
     def set_pot_size(self, pot_size: int):
-        """Set pot size (whole Ⓝ). Not allowed during active round."""
-        self._admin_only()
-        if self.storage["game_active"]:
-            raise Panic("Active round")
+        """Admin sets the winning pot size in NEAR tokens"""
+        self.assert_admin()
+        if self.storage.get("game_active"):
+            raise Exception("Cannot change pot size during active game")
+
         self.storage["pot_size"] = pot_size
+        self.log_event("pot_size_set", {"pot_size": pot_size})
 
     @call
-    def set_commission_rate(self, commission_rate: int):
-        """0 ≤ rate ≤ 50."""
-        self._admin_only()
-        if not 0 <= commission_rate <= 50:
-            raise Panic("Rate 0–50 %")
-        if self.storage["game_active"]:
-            raise Panic("Active round")
-        self.storage["commission_rate"] = commission_rate
+    def set_commission_rate(self, rate: int):
+        """Admin sets commission rate (percentage)"""
+        self.assert_admin()
+        if rate < 0 or rate > 50:
+            raise Exception("Commission rate must be between 0 and 50 percent")
 
-    @call
-    def set_game_duration(self, duration_seconds: int):
-        """≥ 60 s; not during active round."""
-        self._admin_only()
-        if duration_seconds < 60:
-            raise Panic("Min 60 s")
-        if self.storage["game_active"]:
-            raise Panic("Active round")
-        self.storage["game_duration"] = duration_seconds
+        self.storage["commission_rate"] = rate
+        self.log_event("commission_rate_set", {"rate": rate})
 
-    # ─── Ban control
-    @call
-    def ban_player(self, account_id: str):
-        self._admin_only()
-        self.banned.add(account_id)
-
-    @call
-    def unban_player(self, account_id: str):
-        self._admin_only()
-        if self.banned.contains(account_id):
-            self.banned.remove(account_id)
-
-    # ──────────────────────── GAME LIFECYCLE ─────────────────────────────
     @call
     def start_game(self):
-        self._admin_only()
-        self._not_paused()
-        if self.storage["game_active"]:
-            raise Panic("Round already active")
-        if self.storage["pot_size"] == 0:
-            raise Panic("Pot not set")
+        """Admin starts the betting game"""
+        self.assert_admin()
+        if self.storage.get("game_active"):
+            raise Exception("Game already active")
 
-        # reset round state
-        self.storage["game_active"]       = True
-        self.storage["force_refund_mode"] = False
-        self.storage["game_start_time"]   = env.block_timestamp
-        self.storage["winning_team"]      = ""
+        pot_size = self.storage.get("pot_size", 0)
+        if pot_size <= 0:
+            raise Exception("Pot size must be set first")
 
-        self.storage["team_a_total"]  = 0
-        self.storage["team_b_total"]  = 0
+        self.storage["game_active"] = True
+        self.storage["game_started"] = True
+        self.storage["game_start_time"] = self.block_timestamp
+        self.storage["team_a_bets"] = {}
+        self.storage["team_b_bets"] = {}
         self.storage["team_a_points"] = 0
         self.storage["team_b_points"] = 0
-        self.bets.clear()
+        self.storage["winning_team"] = ""
+
+        self.log_event("game_started", {
+            "pot_size": pot_size,
+            "start_time": self.block_timestamp
+        })
 
     @call
     def bet_on_team(self, team: str):
-        self._not_paused()
-        if not self.storage["game_active"]:
-            raise Panic("No active round")
-        if self.storage["force_refund_mode"]:
-            raise Panic("Refund mode")
-        if team not in ("A", "B"):
-            raise Panic("Team must be 'A' or 'B'")
+        """User bets NEAR tokens on a team (A or B)"""
+        if not self.storage.get("game_active"):
+            raise Exception("No active game")
 
-        bettor = env.predecessor_account_id
-        self._not_banned(bettor)
-        if self.bets.contains(bettor):
-            raise Panic("Already bet")
+        if team not in ["A", "B"]:
+            raise Exception("Team must be 'A' or 'B'")
 
-        amount = env.attached_deposit
-        if amount < MIN_BET:
-            raise Panic("Min bet 0.5 Ⓝ")
+        if self.attached_deposit == 0:
+            raise Exception("Must attach NEAR tokens to bet")
 
-        # point rate
-        elapsed = (env.block_timestamp - self.storage["game_start_time"]) // 1_000_000_000
-        idx     = min(elapsed // 3600, 23)
-        rate    = self.point_rates[idx]
-        points  = (amount // ONE_NEAR) * rate
+        user_id = self.predecessor_account_id
+        bet_amount = self.attached_deposit
 
-        # record
-        self.bets[bettor] = BetInfo(amount, points, team)
-        if team == "A":
-            self.storage["team_a_total"]  += amount
-            self.storage["team_a_points"] += points
+        # Calculate points based on time elapsed since game start
+        time_elapsed = self.block_timestamp - self.storage.get("game_start_time", 0)
+        hours_elapsed = time_elapsed // (60 * 60 * 1000000000)  # Convert nanoseconds to hours
+
+        # Get point rate (24 points for first hour, then decreasing)
+        if hours_elapsed >= len(self.storage.get("point_rates", [])):
+            point_rate = 1  # Minimum 1 point per NEAR
         else:
-            self.storage["team_b_total"]  += amount
-            self.storage["team_b_points"] += points
+            point_rate = self.storage.get("point_rates", [])[int(hours_elapsed)]
 
-    # ─── Emergency full refund
-    @call
-    def force_end_game_refund(self):
-        self._admin_only()
-        self._not_paused()
-        if not self.storage["game_active"]:
-            raise Panic("No active round")
+        points_earned = (bet_amount // ONE_NEAR) * point_rate
 
-        self.storage["game_active"]       = False
-        self.storage["force_refund_mode"] = True
+        # Store bet information
+        team_key = f"team_{team.lower()}_bets"
+        team_bets = self.storage.get(team_key, {})
 
-        for acc, info in self.bets.items():
-            info.withdrawable = info.amount
-            self.bets[acc] = info  # update
+        if user_id in team_bets:
+            # Add to existing bet
+            existing_bet = team_bets[user_id]
+            team_bets[user_id] = {
+                "amount": existing_bet["amount"] + bet_amount,
+                "points": existing_bet["points"] + points_earned
+            }
+        else:
+            # New bet
+            team_bets[user_id] = {
+                "amount": bet_amount,
+                "points": points_earned
+            }
 
-    # ─── Normal end
+        self.storage[team_key] = team_bets
+
+        # Update team total points
+        points_key = f"team_{team.lower()}_points"
+        current_points = self.storage.get(points_key, 0)
+        self.storage[points_key] = current_points + points_earned
+
+        self.log_event("bet_placed", {
+            "user": user_id,
+            "team": team,
+            "amount": bet_amount,
+            "points": points_earned,
+            "point_rate": point_rate
+        })
+
     @call
     def end_game(self):
-        self._admin_only()
-        self._not_paused()
-        if not self.storage["game_active"]:
-            raise Panic("No active round")
+        """Admin ends the game and determines winner"""
+        self.assert_admin()
+        if not self.storage.get("game_active"):
+            raise Exception("No active game")
 
+        team_a_points = self.storage.get("team_a_points", 0)
+        team_b_points = self.storage.get("team_b_points", 0)
+
+        if team_a_points == team_b_points:
+            raise Exception("Cannot end game with tie score")
+
+        winning_team = "A" if team_a_points > team_b_points else "B"
+        self.storage["winning_team"] = winning_team
         self.storage["game_active"] = False
 
-        # tie → refund
-        if self.storage["team_a_points"] == self.storage["team_b_points"]:
-            self.force_end_game_refund()
-            return
+        self.log_event("game_ended", {
+            "winning_team": winning_team,
+            "team_a_points": team_a_points,
+            "team_b_points": team_b_points
+        })
 
-        win_side = "A" if self.storage["team_a_points"] > self.storage["team_b_points"] else "B"
-        lose_side = "B" if win_side == "A" else "A"
-        self.storage["winning_team"] = win_side
+        # Trigger payout distribution
+        self._distribute_payouts()
 
-        win_pts  = self.storage["team_a_points"] if win_side == "A" else self.storage["team_b_points"]
-        lose_dep = self.storage["team_b_total"]  if win_side == "A" else self.storage["team_a_total"]
+    def _distribute_payouts(self):
+        """Internal function to distribute payouts to winners and losers"""
+        winning_team = self.storage.get("winning_team")
+        pot_size = self.storage.get("pot_size", 0) * ONE_NEAR
+        commission_rate = self.storage.get("commission_rate", 10)
 
-        # convert pot & commission to yoctoⓃ
-        pot_yocto   = self.storage["pot_size"] * ONE_NEAR
-        commission  = pot_yocto * self.storage["commission_rate"] // 100
-        penalty     = pot_yocto + commission
+        winning_team_key = f"team_{winning_team.lower()}_bets"
+        losing_team_key = f"team_{'a' if winning_team == 'B' else 'b'}_bets"
 
-        # ── losers pay by NEAR stake
-        for acc, info in self.bets.items():
-            if info.team != lose_side:
-                continue
-            share = info.amount / lose_dep
-            loss  = int(penalty * share)
-            info.withdrawable = max(0, info.amount - loss)
-            self.bets[acc] = info
+        winning_bets = self.storage.get(winning_team_key, {})
+        losing_bets = self.storage.get(losing_team_key, {})
 
-        # ── winners share pot by points
-        for acc, info in self.bets.items():
-            if info.team != win_side:
-                continue
-            reward = int((info.points / win_pts) * pot_yocto)
-            info.withdrawable = info.amount + reward
-            self.bets[acc] = info
+        # Calculate total amounts
+        winning_total_amount = sum(bet["amount"] for bet in winning_bets.values())
+        losing_total_amount = sum(bet["amount"] for bet in losing_bets.values())
 
-        # pay commission to admin
-        if commission:
-            Promise.create(self.storage["admin"]).transfer(commission)
+        # Calculate total points for proportional distribution
+        winning_total_points = sum(bet["points"] for bet in winning_bets.values())
 
-    # ───────────────────────── WITHDRAWAL ────────────────────────────────
-    @call
-    def withdraw(self):
-        caller = env.predecessor_account_id
-        self._not_banned(caller)
+        # Calculate commission
+        commission_amount = (pot_size * commission_rate) // 100
+        net_pot = pot_size - commission_amount
 
-        if not self.bets.contains(caller):
-            raise Panic("Nothing to withdraw")
-        info: BetInfo = self.bets.get(caller)
-        amount = info.withdrawable
-        if amount == 0:
-            raise Panic("No balance")
+        # Distribute to winners
+        for user_id, bet_info in winning_bets.items():
+            # User gets their original bet back
+            user_payout = bet_info["amount"]
 
-        info.withdrawable = 0
-        self.bets[caller] = info
-        Promise.create(caller).transfer(amount)
+            # Plus proportional share of the pot
+            if winning_total_points > 0:
+                pot_share = (bet_info["points"] * net_pot) // winning_total_points
+                user_payout += pot_share
 
-    # ──────────────────────────── VIEWS ──────────────────────────────────
+            # Transfer to user (in real implementation, this would be a promise)
+            self.log_event("winner_payout", {
+                "user": user_id,
+                "original_bet": bet_info["amount"],
+                "pot_share": pot_share if winning_total_points > 0 else 0,
+                "total_payout": user_payout
+            })
+
+        # Calculate what losers need to pay and what they get back
+        total_to_pay = pot_size + commission_amount
+
+        if losing_total_amount >= total_to_pay:
+            # Losers can cover the pot + commission
+            for user_id, bet_info in losing_bets.items():
+                # Calculate proportional loss
+                user_loss = (bet_info["amount"] * total_to_pay) // losing_total_amount
+                user_refund = bet_info["amount"] - user_loss
+
+                self.log_event("loser_payout", {
+                    "user": user_id,
+                    "original_bet": bet_info["amount"],
+                    "loss": user_loss,
+                    "refund": user_refund
+                })
+        else:
+            # Losers lose everything (rare case)
+            for user_id, bet_info in losing_bets.items():
+                self.log_event("loser_payout", {
+                    "user": user_id,
+                    "original_bet": bet_info["amount"],
+                    "loss": bet_info["amount"],
+                    "refund": 0
+                })
+
+        # Pay commission to admin
+        admin = self.storage.get("admin")
+        self.log_event("commission_payout", {
+            "admin": admin,
+            "commission": commission_amount
+        })
+
     @view
     def get_game_status(self) -> Dict:
+        """Get current game status"""
         return {
-            "admin":            self.storage["admin"],
-            "paused":           self.storage["paused"],
-            "game_active":      self.storage["game_active"],
-            "force_refund":     self.storage["force_refund_mode"],
-            "pot_size":         self.storage["pot_size"],
-            "commission_rate":  self.storage["commission_rate"],
-            "game_duration":    self.storage["game_duration"],
-            "game_start_time":  self.storage["game_start_time"],
-            "team_a_total":     self.storage["team_a_total"],
-            "team_b_total":     self.storage["team_b_total"],
-            "team_a_points":    self.storage["team_a_points"],
-            "team_b_points":    self.storage["team_b_points"],
-            "winning_team":     self.storage["winning_team"],
-            "banned_count":     len(self.banned),
+            "active": self.storage.get("game_active", False),
+            "started": self.storage.get("game_started", False),
+            "start_time": self.storage.get("game_start_time", 0),
+            "pot_size": self.storage.get("pot_size", 0),
+            "commission_rate": self.storage.get("commission_rate", 10),
+            "team_a_points": self.storage.get("team_a_points", 0),
+            "team_b_points": self.storage.get("team_b_points", 0),
+            "winning_team": self.storage.get("winning_team", "")
         }
 
     @view
-    def preview_points(self) -> int:
-        if not self.storage["game_active"]:
-            return 0
-        elapsed = (env.block_timestamp - self.storage["game_start_time"]) // 1_000_000_000
-        idx     = min(elapsed // 3600, 23)
-        return self.point_rates[idx]
-
-    @view
-    def get_user_bet(self, account_id: str) -> Dict:
-        if not self.bets.contains(account_id):
+    def get_team_bets(self, team: str) -> Dict:
+        """Get all bets for a specific team"""
+        if team not in ["A", "B"]:
             return {}
-        return self.bets.get(account_id).to_dict()
+
+        team_key = f"team_{team.lower()}_bets"
+        return self.storage.get(team_key, {})
 
     @view
-    def is_banned(self, account_id: str) -> bool:
-        return self.banned.contains(account_id)
+    def get_user_bet(self, user_id: str, team: str) -> Dict:
+        """Get a specific user's bet on a team"""
+        if team not in ["A", "B"]:
+            return {}
+
+        team_key = f"team_{team.lower()}_bets"
+        team_bets = self.storage.get(team_key, {})
+        return team_bets.get(user_id, {})
+
+    @view
+    def calculate_current_points(self, amount_near: int) -> int:
+        """Calculate points that would be earned for betting now"""
+        if not self.storage.get("game_active"):
+            return 0
+
+        time_elapsed = self.block_timestamp - self.storage.get("game_start_time", 0)
+        hours_elapsed = time_elapsed // (60 * 60 * 1000000000)
+
+        if hours_elapsed >= len(self.storage.get("point_rates", [])):
+            point_rate = 1
+        else:
+            point_rate = self.storage.get("point_rates", [])[int(hours_elapsed)]
+
+        return amount_near * point_rate
