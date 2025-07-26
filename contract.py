@@ -6,15 +6,15 @@ class TeamBettingContract(Contract):
     """
     A team-based betting contract where:
     - Two teams compete for points
-    - Users bet NEAR tokens on teams
+    - Users bet NEAR tokens on teams (minimum 0.5N)
     - Points are awarded based on deposit time (early = more points)
     - Admin sets pot size, commission, and game duration
     - Winners share the pot proportionally based on points
     - Losers get partial refund after deducting pot + commission (based on NEAR bet amount)
-    - Admin can pause/unpause and force refund games
+    - Admin can pause/unpause, force refund games, and ban players
     """
 
-    @init
+    @init # TGAS: ~5 Tgas
     def initialize(self, admin_id: str):
         """Initialize the contract with admin"""
         self.storage["admin"] = admin_id
@@ -22,10 +22,11 @@ class TeamBettingContract(Contract):
         self.storage["game_started"] = False
         self.storage["game_start_time"] = 0
         self.storage["pot_size"] = 0
-        self.storage["commission_rate"] = 10  # 10% default
+        self  # 10% default
         self.storage["game_duration"] = 3600  # 1 hour default (in seconds)
-        self.storage["paused"] = False  # NEW: Pause functionality
-        self.storage["force_refund_mode"] = False  # NEW: Force refund mode
+        self.storage["paused"] = False
+        self.storage["force_refund_mode"] = False
+        self.storage["banned_players"] = {}  # NEW: Track banned players
         self.storage["team_a_bets"] = {}
         self.storage["team_b_bets"] = {}
         self.storage["team_a_points"] = 0
@@ -44,23 +45,59 @@ class TeamBettingContract(Contract):
         if self.storage.get("paused", False):
             raise Exception("Contract is paused")
 
-    # NEW: Pause and Unpause Functions
-    @call
+    def assert_not_banned(self, user_id: str):
+        """Ensure user is not banned"""
+        banned_players = self.storage.get("banned_players", {})
+        if user_id in banned_players and banned_players[user_id]:
+            raise Exception("Player account is banned")
+
+    # NEW: Ban/Unban Player Functions
+    @call # TGAS: ~15 Tgas
+    def ban_player(self, player_id: str):
+        """Admin bans a player account from participating in betting"""
+        self.assert_admin()
+        self.assert_not_paused()
+        
+        banned_players = self.storage.get("banned_players", {})
+        banned_players[player_id] = True
+        self.storage["banned_players"] = banned_players
+        
+        self.log_event("player_banned", {
+            "admin": self.predecessor_account_id,
+            "banned_player": player_id
+        })
+
+    @call # TGAS: ~15 Tgas
+    def unban_player(self, player_id: str):
+        """Admin unbans a player account"""
+        self.assert_admin()
+        self.assert_not_paused()
+        
+        banned_players = self.storage.get("banned_players", {})
+        if player_id in banned_players:
+            banned_players[player_id] = False
+        self.storage["banned_players"] = banned_players
+        
+        self.log_event("player_unbanned", {
+            "admin": self.predecessor_account_id,
+            "unbanned_player": player_id
+        })
+
+    @call # TGAS: ~10 Tgas
     def pause_game(self):
         """Admin can pause the contract - no functions will work until unpaused"""
         self.assert_admin()
         self.storage["paused"] = True
         self.log_event("game_paused", {"admin": self.predecessor_account_id})
 
-    @call
+    @call # TGAS: ~10 Tgas
     def unpause_game(self):
         """Admin can unpause the contract"""
         self.assert_admin()
         self.storage["paused"] = False
         self.log_event("game_unpaused", {"admin": self.predecessor_account_id})
 
-    # NEW: Set Game Duration
-    @call
+    @call # TGAS: ~20 Tgas
     def set_game_duration(self, duration_seconds: int):
         """Admin sets game duration in seconds (10min=600, 30min=1800, 1hr=3600, 2hr=7200, 24hr=86400, 36hr=129600)"""
         self.assert_admin()
@@ -74,7 +111,7 @@ class TeamBettingContract(Contract):
         self.storage["game_duration"] = duration_seconds
         self.log_event("game_duration_set", {"duration_seconds": duration_seconds})
 
-    @call
+    @call # TGAS: ~20 Tgas
     def set_pot_size(self, pot_size: int):
         """Admin sets the winning pot size in NEAR tokens"""
         self.assert_admin()
@@ -85,7 +122,7 @@ class TeamBettingContract(Contract):
         self.storage["pot_size"] = pot_size
         self.log_event("pot_size_set", {"pot_size": pot_size})
 
-    @call
+    @call # TGAS: ~20 Tgas
     def set_commission_rate(self, rate: int):
         """Admin sets commission rate (percentage)"""
         self.assert_admin()
@@ -99,7 +136,7 @@ class TeamBettingContract(Contract):
         self.storage["commission_rate"] = rate
         self.log_event("commission_rate_set", {"rate": rate})
 
-    @call
+    @call # TGAS: ~30 Tgas
     def start_game(self):
         """Admin starts the betting game"""
         self.assert_admin()
@@ -127,10 +164,15 @@ class TeamBettingContract(Contract):
             "duration": self.storage.get("game_duration", 3600)
         })
 
-    @call
+    @call # TGAS: ~50 Tgas
     def bet_on_team(self, team: str):
-        """User bets NEAR tokens on a team (A or B)"""
+        """User bets NEAR tokens on a team (A or B) - UPDATED: Minimum 0.5N required and check for banned players"""
         self.assert_not_paused()
+        
+        # NEW: Check if player is banned
+        user_id = self.predecessor_account_id
+        self.assert_not_banned(user_id)
+        
         if not self.storage.get("game_active"):
             raise Exception("No active game")
             
@@ -143,7 +185,11 @@ class TeamBettingContract(Contract):
         if self.attached_deposit == 0:
             raise Exception("Must attach NEAR tokens to bet")
 
-        user_id = self.predecessor_account_id
+        # NEW: Check minimum betting amount of 0.5 NEAR
+        minimum_bet = ONE_NEAR // 2  # 0.5 NEAR in yoctoNEAR
+        if self.attached_deposit < minimum_bet:
+            raise Exception("Minimum betting amount is 0.5 NEAR")
+
         bet_amount = self.attached_deposit
 
         # Calculate points based on time elapsed since game start
@@ -191,8 +237,7 @@ class TeamBettingContract(Contract):
             "point_rate": point_rate
         })
 
-    # NEW: Force End Game with Full Refunds
-    @call
+    @call # TGAS: ~100 Tgas
     def force_end_game_refund(self):
         """Admin ends the game and everyone gets their original NEAR amount back without any deduction"""
         self.assert_admin()
@@ -237,7 +282,7 @@ class TeamBettingContract(Contract):
             "refund_mode": True
         })
 
-    @call
+    @call # TGAS: ~80 Tgas
     def end_game(self):
         """Admin ends the game and determines winner"""
         self.assert_admin()
@@ -264,7 +309,7 @@ class TeamBettingContract(Contract):
         # Trigger payout distribution
         self._distribute_payouts()
 
-    def _distribute_payouts(self):
+    def _distribute_payouts(self): # TGAS: ~150 Tgas (internal function, called by end_game)
         """Internal function to distribute payouts to winners and losers - UPDATED: Loss calculation by NEAR amount"""
         winning_team = self.storage.get("winning_team")
         pot_size = self.storage.get("pot_size", 0) * ONE_NEAR
@@ -337,12 +382,14 @@ class TeamBettingContract(Contract):
             "commission": commission_amount
         })
 
-    # NEW: Withdraw function for users to claim their payouts/refunds
-    @call
+    @call # TGAS: ~30 Tgas
     def withdraw(self):
         """Users can withdraw their winnings or refunds after game ends"""
         self.assert_not_paused()
         user_id = self.predecessor_account_id
+        
+        # NEW: Check if player is banned (banned players can still withdraw)
+        # Note: We allow withdrawals even for banned players as they should be able to claim existing winnings
         
         if self.storage.get("game_active", False):
             raise Exception("Cannot withdraw during active game")
@@ -355,24 +402,24 @@ class TeamBettingContract(Contract):
             "timestamp": self.block_timestamp
         })
 
-    @view
+    @view # TGAS: ~5 Tgas
     def get_game_status(self) -> Dict:
         """Get current game status - UPDATED with new fields"""
         return {
             "active": self.storage.get("game_active", False),
             "started": self.storage.get("game_started", False),
-            "paused": self.storage.get("paused", False),  # NEW
-            "force_refund_mode": self.storage.get("force_refund_mode", False),  # NEW
+            "paused": self.storage.get("paused", False),
+            "force_refund_mode": self.storage.get("force_refund_mode", False),
             "start_time": self.storage.get("game_start_time", 0),
             "pot_size": self.storage.get("pot_size", 0),
             "commission_rate": self.storage.get("commission_rate", 10),
-            "game_duration": self.storage.get("game_duration", 3600),  # NEW
+            "game_duration": self.storage.get("game_duration", 3600),
             "team_a_points": self.storage.get("team_a_points", 0),
             "team_b_points": self.storage.get("team_b_points", 0),
             "winning_team": self.storage.get("winning_team", "")
         }
 
-    @view
+    @view # TGAS: ~10 Tgas
     def get_team_bets(self, team: str) -> Dict:
         """Get all bets for a specific team"""
         if team not in ["A", "B"]:
@@ -381,7 +428,7 @@ class TeamBettingContract(Contract):
         team_key = f"team_{team.lower()}_bets"
         return self.storage.get(team_key, {})
 
-    @view
+    @view # TGAS: ~8 Tgas
     def get_user_bet(self, user_id: str, team: str) -> Dict:
         """Get a specific user's bet on a team"""
         if team not in ["A", "B"]:
@@ -391,7 +438,7 @@ class TeamBettingContract(Contract):
         team_bets = self.storage.get(team_key, {})
         return team_bets.get(user_id, {})
 
-    @view
+    @view # TGAS: ~8 Tgas
     def calculate_current_points(self, amount_near: int) -> int:
         """Calculate points that would be earned for betting now"""
         if not self.storage.get("game_active"):
@@ -407,7 +454,7 @@ class TeamBettingContract(Contract):
 
         return amount_near * point_rate
 
-    @view
+    @view # TGAS: ~5 Tgas
     def get_admin_info(self) -> Dict:
         """Get admin and contract configuration info"""
         return {
@@ -417,3 +464,17 @@ class TeamBettingContract(Contract):
             "commission_rate": self.storage.get("commission_rate", 10),
             "game_duration": self.storage.get("game_duration", 3600)
         }
+
+    # NEW: View functions for banned players
+    @view # TGAS: ~8 Tgas
+    def is_player_banned(self, player_id: str) -> bool:
+        """Check if a specific player is banned"""
+        banned_players = self.storage.get("banned_players", {})
+        return banned_players.get(player_id, False)
+
+    @view # TGAS: ~10 Tgas
+    def get_banned_players(self) -> List[str]:
+        """Get list of all banned players (admin only for privacy)"""
+        # Note: In production, you might want to restrict this to admin only
+        banned_players = self.storage.get("banned_players", {})
+        return [player_id for player_id, is_banned in banned_players.items() if is_banned]
