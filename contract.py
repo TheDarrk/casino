@@ -382,23 +382,32 @@ class TeamBettingContract(Contract):
             "commission": commission_amount
         })
 
-    @call # TGAS: ~30 Tgas
+    @call  # TGAS: ~30 Tgas
     def withdraw(self):
         """Users can withdraw their winnings or refunds after game ends"""
         self.assert_not_paused()
         user_id = self.predecessor_account_id
-        
-        # NEW: Check if player is banned (banned players can still withdraw)
-        # Note: We allow withdrawals even for banned players as they should be able to claim existing winnings
-        
+
         if self.storage.get("game_active", False):
             raise Exception("Cannot withdraw during active game")
-            
-        # Check if user has any winnings/refunds to claim
-        # This would typically involve checking event logs or a separate withdrawal mapping
-        # For now, we'll log the withdrawal attempt
-        self.log_event("withdrawal_attempt", {
+
+        withdrawable = self.storage.get("withdrawable", {})
+        amount = withdrawable.get(user_id, 0)
+
+        if amount == 0:
+            raise Exception("No withdrawable balance available")
+
+        # Transfer NEAR tokens to user - using NEAR SDK promise transfer
+        # The `transfer` API might differ depending on your NEAR Python SDK
+        self.promise_transfer(user_id, amount)
+
+        # Clear withdrawable balance for user to prevent double withdrawal
+        withdrawable[user_id] = 0
+        self.storage["withdrawable"] = withdrawable
+
+        self.log_event("withdrawal", {
             "user": user_id,
+            "amount": amount,
             "timestamp": self.block_timestamp
         })
 
