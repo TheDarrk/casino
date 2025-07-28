@@ -1,5 +1,6 @@
 from near_sdk_py import Contract, call, view, init, ONE_NEAR
 from typing import Dict, List, Optional
+from near_sdk_py.promises import Promise
 import json
 
 class TeamBettingContract(Contract):
@@ -22,16 +23,17 @@ class TeamBettingContract(Contract):
         self.storage["game_started"] = False
         self.storage["game_start_time"] = 0
         self.storage["pot_size"] = 0
-        self  # 10% default
+        self.storage["commission_rate"] = 10  # 10% default
         self.storage["game_duration"] = 3600  # 1 hour default (in seconds)
         self.storage["paused"] = False
         self.storage["force_refund_mode"] = False
-        self.storage["banned_players"] = {}  # NEW: Track banned players
+        self.storage["banned_players"] = {}  # Track banned players
         self.storage["team_a_bets"] = {}
         self.storage["team_b_bets"] = {}
         self.storage["team_a_points"] = 0
         self.storage["team_b_points"] = 0
         self.storage["winning_team"] = ""
+        self.storage["withdrawable"] = {}  # NEW: Track how much each user can withdraw
         self.storage["point_rates"] = [24, 23, 22, 21, 20, 19, 18, 17, 16, 15]  # Points per NEAR for each hour
 
     def assert_admin(self):
@@ -51,99 +53,89 @@ class TeamBettingContract(Contract):
         if user_id in banned_players and banned_players[user_id]:
             raise Exception("Player account is banned")
 
-    # NEW: Ban/Unban Player Functions
-    @call # TGAS: ~15 Tgas
+    # Ban/Unban Player Functions
+    @call  # TGAS: ~15 Tgas
     def ban_player(self, player_id: str):
         """Admin bans a player account from participating in betting"""
         self.assert_admin()
         self.assert_not_paused()
-        
         banned_players = self.storage.get("banned_players", {})
         banned_players[player_id] = True
         self.storage["banned_players"] = banned_players
-        
         self.log_event("player_banned", {
             "admin": self.predecessor_account_id,
             "banned_player": player_id
         })
 
-    @call # TGAS: ~15 Tgas
+    @call  # TGAS: ~15 Tgas
     def unban_player(self, player_id: str):
         """Admin unbans a player account"""
         self.assert_admin()
         self.assert_not_paused()
-        
         banned_players = self.storage.get("banned_players", {})
         if player_id in banned_players:
             banned_players[player_id] = False
         self.storage["banned_players"] = banned_players
-        
         self.log_event("player_unbanned", {
             "admin": self.predecessor_account_id,
             "unbanned_player": player_id
         })
 
-    @call # TGAS: ~10 Tgas
+    @call  # TGAS: ~10 Tgas
     def pause_game(self):
         """Admin can pause the contract - no functions will work until unpaused"""
         self.assert_admin()
         self.storage["paused"] = True
         self.log_event("game_paused", {"admin": self.predecessor_account_id})
 
-    @call # TGAS: ~10 Tgas
+    @call  # TGAS: ~10 Tgas
     def unpause_game(self):
         """Admin can unpause the contract"""
         self.assert_admin()
         self.storage["paused"] = False
         self.log_event("game_unpaused", {"admin": self.predecessor_account_id})
 
-    @call # TGAS: ~20 Tgas
+    @call  # TGAS: ~20 Tgas
     def set_game_duration(self, duration_seconds: int):
-        """Admin sets game duration in seconds (10min=600, 30min=1800, 1hr=3600, 2hr=7200, 24hr=86400, 36hr=129600)"""
+        """Admin sets game duration in seconds"""
         self.assert_admin()
         self.assert_not_paused()
         if self.storage.get("game_active"):
             raise Exception("Cannot change game duration during active game")
-        
-        if duration_seconds < 60:  # Minimum 1 minute
+        if duration_seconds < 60:
             raise Exception("Game duration must be at least 60 seconds")
-            
         self.storage["game_duration"] = duration_seconds
         self.log_event("game_duration_set", {"duration_seconds": duration_seconds})
 
-    @call # TGAS: ~20 Tgas
+    @call  # TGAS: ~20 Tgas
     def set_pot_size(self, pot_size: int):
         """Admin sets the winning pot size in NEAR tokens"""
         self.assert_admin()
         self.assert_not_paused()
         if self.storage.get("game_active"):
             raise Exception("Cannot change pot size during active game")
-
         self.storage["pot_size"] = pot_size
         self.log_event("pot_size_set", {"pot_size": pot_size})
 
-    @call # TGAS: ~20 Tgas
+    @call  # TGAS: ~20 Tgas
     def set_commission_rate(self, rate: int):
         """Admin sets commission rate (percentage)"""
         self.assert_admin()
         self.assert_not_paused()
         if self.storage.get("game_active"):
             raise Exception("Cannot change commission rate during active game")
-            
         if rate < 0 or rate > 50:
             raise Exception("Commission rate must be between 0 and 50 percent")
-
         self.storage["commission_rate"] = rate
         self.log_event("commission_rate_set", {"rate": rate})
 
-    @call # TGAS: ~30 Tgas
+    @call  # TGAS: ~30 Tgas
     def start_game(self):
         """Admin starts the betting game"""
         self.assert_admin()
         self.assert_not_paused()
         if self.storage.get("game_active"):
             raise Exception("Game already active")
-
         pot_size = self.storage.get("pot_size", 0)
         if pot_size <= 0:
             raise Exception("Pot size must be set first")
@@ -157,6 +149,7 @@ class TeamBettingContract(Contract):
         self.storage["team_a_points"] = 0
         self.storage["team_b_points"] = 0
         self.storage["winning_team"] = ""
+        self.storage["withdrawable"] = {}  # Clear withdrawable on new game
 
         self.log_event("game_started", {
             "pot_size": pot_size,
@@ -164,59 +157,46 @@ class TeamBettingContract(Contract):
             "duration": self.storage.get("game_duration", 3600)
         })
 
-    @call # TGAS: ~50 Tgas
+    @call  # TGAS: ~50 Tgas
     def bet_on_team(self, team: str):
-        """User bets NEAR tokens on a team (A or B) - UPDATED: Minimum 0.5N required and check for banned players"""
+        """User bets NEAR tokens on a team (A or B) with minimum 0.5N and banned check"""
         self.assert_not_paused()
-        
-        # NEW: Check if player is banned
         user_id = self.predecessor_account_id
         self.assert_not_banned(user_id)
-        
         if not self.storage.get("game_active"):
             raise Exception("No active game")
-            
         if self.storage.get("force_refund_mode", False):
             raise Exception("Game is in refund mode - betting disabled")
-
         if team not in ["A", "B"]:
             raise Exception("Team must be 'A' or 'B'")
-
         if self.attached_deposit == 0:
             raise Exception("Must attach NEAR tokens to bet")
 
-        # NEW: Check minimum betting amount of 0.5 NEAR
         minimum_bet = ONE_NEAR // 2  # 0.5 NEAR in yoctoNEAR
         if self.attached_deposit < minimum_bet:
             raise Exception("Minimum betting amount is 0.5 NEAR")
 
         bet_amount = self.attached_deposit
-
-        # Calculate points based on time elapsed since game start
         time_elapsed = self.block_timestamp - self.storage.get("game_start_time", 0)
-        hours_elapsed = time_elapsed // (60 * 60 * 1000000000)  # Convert nanoseconds to hours
+        hours_elapsed = time_elapsed // (60 * 60 * 1000000000)  # nanoseconds to hours
 
-        # Get point rate (24 points for first hour, then decreasing)
         if hours_elapsed >= len(self.storage.get("point_rates", [])):
-            point_rate = 1  # Minimum 1 point per NEAR
+            point_rate = 1
         else:
             point_rate = self.storage.get("point_rates", [])[int(hours_elapsed)]
 
         points_earned = (bet_amount // ONE_NEAR) * point_rate
 
-        # Store bet information
         team_key = f"team_{team.lower()}_bets"
         team_bets = self.storage.get(team_key, {})
 
         if user_id in team_bets:
-            # Add to existing bet
             existing_bet = team_bets[user_id]
             team_bets[user_id] = {
                 "amount": existing_bet["amount"] + bet_amount,
                 "points": existing_bet["points"] + points_earned
             }
         else:
-            # New bet
             team_bets[user_id] = {
                 "amount": bet_amount,
                 "points": points_earned
@@ -224,7 +204,6 @@ class TeamBettingContract(Contract):
 
         self.storage[team_key] = team_bets
 
-        # Update team total points
         points_key = f"team_{team.lower()}_points"
         current_points = self.storage.get(points_key, 0)
         self.storage[points_key] = current_points + points_earned
@@ -237,9 +216,9 @@ class TeamBettingContract(Contract):
             "point_rate": point_rate
         })
 
-    @call # TGAS: ~100 Tgas
+    @call  # TGAS: ~100 Tgas
     def force_end_game_refund(self):
-        """Admin ends the game and everyone gets their original NEAR amount back without any deduction"""
+        """Admin ends the game and refunds all players fully"""
         self.assert_admin()
         self.assert_not_paused()
         if not self.storage.get("game_active"):
@@ -247,17 +226,16 @@ class TeamBettingContract(Contract):
 
         self.storage["game_active"] = False
         self.storage["force_refund_mode"] = True
-        
-        # Log all refunds
+
         team_a_bets = self.storage.get("team_a_bets", {})
         team_b_bets = self.storage.get("team_b_bets", {})
-        
+        withdrawable = self.storage.get("withdrawable", {})
         total_refunded = 0
-        
-        # Process Team A refunds
+
         for user_id, bet_info in team_a_bets.items():
             refund_amount = bet_info["amount"]
             total_refunded += refund_amount
+            withdrawable[user_id] = refund_amount
             self.log_event("force_refund", {
                 "user": user_id,
                 "team": "A",
@@ -265,16 +243,18 @@ class TeamBettingContract(Contract):
                 "original_bet": bet_info["amount"]
             })
 
-        # Process Team B refunds  
         for user_id, bet_info in team_b_bets.items():
             refund_amount = bet_info["amount"]
             total_refunded += refund_amount
+            withdrawable[user_id] = refund_amount
             self.log_event("force_refund", {
                 "user": user_id,
-                "team": "B", 
+                "team": "B",
                 "refund_amount": refund_amount,
                 "original_bet": bet_info["amount"]
             })
+
+        self.storage["withdrawable"] = withdrawable
 
         self.log_event("game_force_ended", {
             "admin": self.predecessor_account_id,
@@ -282,9 +262,9 @@ class TeamBettingContract(Contract):
             "refund_mode": True
         })
 
-    @call # TGAS: ~80 Tgas
+    @call  # TGAS: ~80 Tgas
     def end_game(self):
-        """Admin ends the game and determines winner"""
+        """Admin ends the game and triggers payouts"""
         self.assert_admin()
         self.assert_not_paused()
         if not self.storage.get("game_active"):
@@ -306,11 +286,9 @@ class TeamBettingContract(Contract):
             "team_b_points": team_b_points
         })
 
-        # Trigger payout distribution
         self._distribute_payouts()
 
-    def _distribute_payouts(self): # TGAS: ~150 Tgas (internal function, called by end_game)
-        """Internal function to distribute payouts to winners and losers - UPDATED: Loss calculation by NEAR amount"""
+    def _distribute_payouts(self):  # TGAS: ~150 Tgas
         winning_team = self.storage.get("winning_team")
         pot_size = self.storage.get("pot_size", 0) * ONE_NEAR
         commission_rate = self.storage.get("commission_rate", 10)
@@ -321,41 +299,40 @@ class TeamBettingContract(Contract):
         winning_bets = self.storage.get(winning_team_key, {})
         losing_bets = self.storage.get(losing_team_key, {})
 
-        # Calculate total amounts
         winning_total_amount = sum(bet["amount"] for bet in winning_bets.values())
         losing_total_amount = sum(bet["amount"] for bet in losing_bets.values())
 
-        # Calculate total points for proportional distribution (winners only)
         winning_total_points = sum(bet["points"] for bet in winning_bets.values())
 
-        # Calculate commission
         commission_amount = (pot_size * commission_rate) // 100
-        total_to_pay = pot_size + commission_amount  # Total that losing side must cover
+        total_to_pay = pot_size + commission_amount
 
-        # Distribute to winners (based on points for pot distribution)
+        withdrawable = self.storage.get("withdrawable", {})
+
+        # Distribute to winners
         for user_id, bet_info in winning_bets.items():
-            # User gets their original bet back
             user_payout = bet_info["amount"]
-
-            # Plus proportional share of the pot (based on points)
+            pot_share = 0
             if winning_total_points > 0:
                 pot_share = (bet_info["points"] * pot_size) // winning_total_points
                 user_payout += pot_share
 
+            withdrawable[user_id] = user_payout
+
             self.log_event("winner_payout", {
                 "user": user_id,
                 "original_bet": bet_info["amount"],
-                "pot_share": pot_share if winning_total_points > 0 else 0,
+                "pot_share": pot_share,
                 "total_payout": user_payout
             })
 
-        # UPDATED: Calculate what losers pay and get back (based on NEAR bet amount, NOT points)
+        # Distribute to losers
         if losing_total_amount >= total_to_pay:
-            # Losers can cover the pot + commission
             for user_id, bet_info in losing_bets.items():
-                # Calculate proportional loss based on NEAR bet amount
                 user_loss = (bet_info["amount"] * total_to_pay) // losing_total_amount
                 user_refund = bet_info["amount"] - user_loss
+
+                withdrawable[user_id] = user_refund
 
                 self.log_event("loser_payout", {
                     "user": user_id,
@@ -365,8 +342,8 @@ class TeamBettingContract(Contract):
                     "loss_calculation": "based_on_near_amount"
                 })
         else:
-            # Losers lose everything (rare case)
             for user_id, bet_info in losing_bets.items():
+                withdrawable[user_id] = 0
                 self.log_event("loser_payout", {
                     "user": user_id,
                     "original_bet": bet_info["amount"],
@@ -375,7 +352,8 @@ class TeamBettingContract(Contract):
                     "loss_calculation": "total_loss"
                 })
 
-        # Pay commission to admin
+        self.storage["withdrawable"] = withdrawable
+
         admin = self.storage.get("admin")
         self.log_event("commission_payout", {
             "admin": admin,
@@ -384,7 +362,7 @@ class TeamBettingContract(Contract):
 
     @call  # TGAS: ~30 Tgas
     def withdraw(self):
-        """Users can withdraw their winnings or refunds after game ends"""
+        """Users can withdraw winnings or refunds after game ends"""
         self.assert_not_paused()
         user_id = self.predecessor_account_id
 
@@ -397,11 +375,10 @@ class TeamBettingContract(Contract):
         if amount == 0:
             raise Exception("No withdrawable balance available")
 
-        # Transfer NEAR tokens to user - using NEAR SDK promise transfer
-        # The `transfer` API might differ depending on your NEAR Python SDK
-        self.promise_transfer(user_id, amount)
+        # FIXED: Use Promise.create_batch instead of self.promise_transfer
+        transfer_promise = Promise.create_batch(user_id).transfer(amount)
 
-        # Clear withdrawable balance for user to prevent double withdrawal
+        # Clear the withdrawable balance
         withdrawable[user_id] = 0
         self.storage["withdrawable"] = withdrawable
 
@@ -411,9 +388,13 @@ class TeamBettingContract(Contract):
             "timestamp": self.block_timestamp
         })
 
-    @view # TGAS: ~5 Tgas
+        # Return the promise for proper transaction handling
+        return transfer_promise
+
+
+    # View functions
+    @view  # TGAS: ~5 Tgas
     def get_game_status(self) -> Dict:
-        """Get current game status - UPDATED with new fields"""
         return {
             "active": self.storage.get("game_active", False),
             "started": self.storage.get("game_started", False),
@@ -428,44 +409,35 @@ class TeamBettingContract(Contract):
             "winning_team": self.storage.get("winning_team", "")
         }
 
-    @view # TGAS: ~10 Tgas
+    @view  # TGAS: ~10 Tgas
     def get_team_bets(self, team: str) -> Dict:
-        """Get all bets for a specific team"""
         if team not in ["A", "B"]:
             return {}
-
         team_key = f"team_{team.lower()}_bets"
         return self.storage.get(team_key, {})
 
-    @view # TGAS: ~8 Tgas
+    @view  # TGAS: ~8 Tgas
     def get_user_bet(self, user_id: str, team: str) -> Dict:
-        """Get a specific user's bet on a team"""
         if team not in ["A", "B"]:
             return {}
-
         team_key = f"team_{team.lower()}_bets"
         team_bets = self.storage.get(team_key, {})
         return team_bets.get(user_id, {})
 
-    @view # TGAS: ~8 Tgas
+    @view  # TGAS: ~8 Tgas
     def calculate_current_points(self, amount_near: int) -> int:
-        """Calculate points that would be earned for betting now"""
         if not self.storage.get("game_active"):
             return 0
-
         time_elapsed = self.block_timestamp - self.storage.get("game_start_time", 0)
         hours_elapsed = time_elapsed // (60 * 60 * 1000000000)
-
         if hours_elapsed >= len(self.storage.get("point_rates", [])):
             point_rate = 1
         else:
             point_rate = self.storage.get("point_rates", [])[int(hours_elapsed)]
-
         return amount_near * point_rate
 
-    @view # TGAS: ~5 Tgas
+    @view  # TGAS: ~5 Tgas
     def get_admin_info(self) -> Dict:
-        """Get admin and contract configuration info"""
         return {
             "admin": self.storage.get("admin", ""),
             "paused": self.storage.get("paused", False),
@@ -474,16 +446,12 @@ class TeamBettingContract(Contract):
             "game_duration": self.storage.get("game_duration", 3600)
         }
 
-    # NEW: View functions for banned players
-    @view # TGAS: ~8 Tgas
+    @view  # TGAS: ~8 Tgas
     def is_player_banned(self, player_id: str) -> bool:
-        """Check if a specific player is banned"""
         banned_players = self.storage.get("banned_players", {})
         return banned_players.get(player_id, False)
 
-    @view # TGAS: ~10 Tgas
+    @view  # TGAS: ~10 Tgas
     def get_banned_players(self) -> List[str]:
-        """Get list of all banned players (admin only for privacy)"""
-        # Note: In production, you might want to restrict this to admin only
         banned_players = self.storage.get("banned_players", {})
         return [player_id for player_id, is_banned in banned_players.items() if is_banned]
