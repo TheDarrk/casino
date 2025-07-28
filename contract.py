@@ -1,7 +1,10 @@
 from near_sdk_py import Contract, call, view, init, ONE_NEAR
-from typing import Dict, List, Optional
 from near_sdk_py.promises import Promise
+from typing import Dict, List, Optional
 import json
+
+EARLY_BIRD_RATE = 32  # points per NEAR before timer starts
+
 
 class TeamBettingContract(Contract):
     """
@@ -15,25 +18,27 @@ class TeamBettingContract(Contract):
     - Admin can pause/unpause, force refund games, and ban players
     """
 
-    @init # TGAS: ~5 Tgas
+    @init  # TGAS: ~5 Tgas
     def initialize(self, admin_id: str):
         """Initialize the contract with admin"""
         self.storage["admin"] = admin_id
-        self.storage["game_active"] = False
-        self.storage["game_started"] = False
+        self.storage["game_active"] = False       # betting open?
+        self.storage["game_started"] = False      # timer running?
         self.storage["game_start_time"] = 0
         self.storage["pot_size"] = 0
-        self.storage["commission_rate"] = 10  # 10% default
-        self.storage["game_duration"] = 3600  # 1 hour default (in seconds)
+        self.storage["commission_rate"] = 10      # 10% default
+        self.storage["game_duration"] = 3600      # 1 hour default (in seconds)
         self.storage["paused"] = False
         self.storage["force_refund_mode"] = False
-        self.storage["banned_players"] = {}  # Track banned players
+        self.storage["banned_players"] = {}       # Track banned players
         self.storage["team_a_bets"] = {}
         self.storage["team_b_bets"] = {}
         self.storage["team_a_points"] = 0
         self.storage["team_b_points"] = 0
+        self.storage["team_a_total_amount"] = 0   # NEW: running totals
+        self.storage["team_b_total_amount"] = 0
         self.storage["winning_team"] = ""
-        self.storage["withdrawable"] = {}  # NEW: Track how much each user can withdraw
+        self.storage["withdrawable"] = {}         # Track how much each user can withdraw
         self.storage["point_rates"] = [24, 23, 22, 21, 20, 19, 18, 17, 16, 15]  # Points per NEAR for each hour
 
     def assert_admin(self):
@@ -129,9 +134,16 @@ class TeamBettingContract(Contract):
         self.storage["commission_rate"] = rate
         self.log_event("commission_rate_set", {"rate": rate})
 
+    # -------------------------------------------------
+    # NEW: UPDATED GAME START LOGIC
+    # -------------------------------------------------
     @call  # TGAS: ~30 Tgas
     def start_game(self):
-        """Admin starts the betting game"""
+        """
+        Admin opens the game for betting. The timer is NOT started yet.
+        Timer starts automatically when both teams reach pot+commission threshold
+        or manually by admin using start_timer()
+        """
         self.assert_admin()
         self.assert_not_paused()
         if self.storage.get("game_active"):
@@ -140,26 +152,50 @@ class TeamBettingContract(Contract):
         if pot_size <= 0:
             raise Exception("Pot size must be set first")
 
+        # Reset game state
         self.storage["game_active"] = True
-        self.storage["game_started"] = True
-        self.storage["game_start_time"] = self.block_timestamp
+        self.storage["game_started"] = False        # Timer not started yet
+        self.storage["game_start_time"] = 0
         self.storage["force_refund_mode"] = False
         self.storage["team_a_bets"] = {}
         self.storage["team_b_bets"] = {}
         self.storage["team_a_points"] = 0
         self.storage["team_b_points"] = 0
+        self.storage["team_a_total_amount"] = 0
+        self.storage["team_b_total_amount"] = 0
         self.storage["winning_team"] = ""
         self.storage["withdrawable"] = {}  # Clear withdrawable on new game
 
-        self.log_event("game_started", {
+        self.log_event("game_opened", {
             "pot_size": pot_size,
-            "start_time": self.block_timestamp,
-            "duration": self.storage.get("game_duration", 3600)
+            "commission_rate": self.storage.get("commission_rate", 10),
+            "early_bird_rate": EARLY_BIRD_RATE
         })
 
+    @call  # TGAS: ~15 Tgas
+    def start_timer(self):
+        """
+        Admin can manually start the timer at any time after betting is open
+        """
+        self.assert_admin()
+        self.assert_not_paused()
+        if not self.storage.get("game_active"):
+            raise Exception("Game not active")
+        if self.storage.get("game_started"):
+            raise Exception("Timer already started")
+
+        self._start_timer_internal("manual")
+
+    # -------------------------------------------------
+    # UPDATED BETTING LOGIC
+    # -------------------------------------------------
     @call  # TGAS: ~50 Tgas
     def bet_on_team(self, team: str):
-        """User bets NEAR tokens on a team (A or B) with minimum 0.5N and banned check"""
+        """
+        User bets NEAR tokens on a team (A or B) with minimum 0.5N
+        Early bird rate (32 points/NEAR) applies before timer starts
+        Hourly decay schedule applies after timer starts
+        """
         self.assert_not_paused()
         user_id = self.predecessor_account_id
         self.assert_not_banned(user_id)
@@ -177,16 +213,23 @@ class TeamBettingContract(Contract):
             raise Exception("Minimum betting amount is 0.5 NEAR")
 
         bet_amount = self.attached_deposit
-        time_elapsed = self.block_timestamp - self.storage.get("game_start_time", 0)
-        hours_elapsed = time_elapsed // (60 * 60 * 1000000000)  # nanoseconds to hours
 
-        if hours_elapsed >= len(self.storage.get("point_rates", [])):
-            point_rate = 1
+        # -------- POINT CALCULATION --------
+        if not self.storage.get("game_started"):
+            # Early bird rate before timer starts
+            point_rate = EARLY_BIRD_RATE
         else:
-            point_rate = self.storage.get("point_rates", [])[int(hours_elapsed)]
+            # Hourly decay after timer starts
+            time_elapsed = self.block_timestamp - self.storage.get("game_start_time", 0)
+            hours_elapsed = time_elapsed // (60 * 60 * 1000000000)  # nanoseconds to hours
+            if hours_elapsed >= len(self.storage.get("point_rates", [])):
+                point_rate = 1
+            else:
+                point_rate = self.storage.get("point_rates", [])[int(hours_elapsed)]
 
         points_earned = (bet_amount // ONE_NEAR) * point_rate
 
+        # -------- STORAGE UPDATE --------
         team_key = f"team_{team.lower()}_bets"
         team_bets = self.storage.get(team_key, {})
 
@@ -204,9 +247,13 @@ class TeamBettingContract(Contract):
 
         self.storage[team_key] = team_bets
 
+        # Update team totals and points
         points_key = f"team_{team.lower()}_points"
+        total_key = f"team_{team.lower()}_total_amount"
         current_points = self.storage.get(points_key, 0)
+        current_total = self.storage.get(total_key, 0)
         self.storage[points_key] = current_points + points_earned
+        self.storage[total_key] = current_total + bet_amount
 
         self.log_event("bet_placed", {
             "user": user_id,
@@ -216,6 +263,45 @@ class TeamBettingContract(Contract):
             "point_rate": point_rate
         })
 
+        # -------- AUTO-START TIMER CHECK ----
+        self._maybe_auto_start_timer()
+
+    # -------------------------------------------------
+    # INTERNAL TIMER LOGIC
+    # -------------------------------------------------
+    def _maybe_auto_start_timer(self):
+        """
+        Auto-start timer when both teams' total bets >= pot + commission
+        """
+        if self.storage.get("game_started"):
+            return  # Timer already started
+
+        pot_near = self.storage.get("pot_size", 0)
+        commission_rate = self.storage.get("commission_rate", 10)
+        threshold_yocto = (pot_near * (100 + commission_rate) // 100) * ONE_NEAR
+
+        team_a_total = self.storage.get("team_a_total_amount", 0)
+        team_b_total = self.storage.get("team_b_total_amount", 0)
+
+        if team_a_total >= threshold_yocto and team_b_total >= threshold_yocto:
+            self._start_timer_internal("auto")
+
+    def _start_timer_internal(self, mode: str):
+        """
+        Internal function to start the timer and record the event
+        """
+        self.storage["game_started"] = True
+        self.storage["game_start_time"] = self.block_timestamp
+
+        self.log_event("timer_started", {
+            "mode": mode,  # "auto" or "manual"
+            "start_time": self.block_timestamp,
+            "duration": self.storage.get("game_duration", 3600)
+        })
+
+    # -------------------------------------------------
+    # FORCE REFUND FUNCTION (WAS MISSING)
+    # -------------------------------------------------
     @call  # TGAS: ~100 Tgas
     def force_end_game_refund(self):
         """Admin ends the game and refunds all players fully"""
@@ -232,6 +318,7 @@ class TeamBettingContract(Contract):
         withdrawable = self.storage.get("withdrawable", {})
         total_refunded = 0
 
+        # Refund team A players
         for user_id, bet_info in team_a_bets.items():
             refund_amount = bet_info["amount"]
             total_refunded += refund_amount
@@ -243,6 +330,7 @@ class TeamBettingContract(Contract):
                 "original_bet": bet_info["amount"]
             })
 
+        # Refund team B players
         for user_id, bet_info in team_b_bets.items():
             refund_amount = bet_info["amount"]
             total_refunded += refund_amount
@@ -262,13 +350,18 @@ class TeamBettingContract(Contract):
             "refund_mode": True
         })
 
+    # -------------------------------------------------
+    # UPDATED END GAME LOGIC
+    # -------------------------------------------------
     @call  # TGAS: ~80 Tgas
     def end_game(self):
-        """Admin ends the game and triggers payouts"""
+        """Admin ends the game and triggers payouts - now requires timer to have started"""
         self.assert_admin()
         self.assert_not_paused()
         if not self.storage.get("game_active"):
             raise Exception("No active game")
+        if not self.storage.get("game_started"):
+            raise Exception("Timer has not started yet - cannot end game")
 
         team_a_points = self.storage.get("team_a_points", 0)
         team_b_points = self.storage.get("team_b_points", 0)
@@ -360,9 +453,12 @@ class TeamBettingContract(Contract):
             "commission": commission_amount
         })
 
+    # -------------------------------------------------
+    # FIXED WITHDRAW FUNCTION
+    # -------------------------------------------------
     @call  # TGAS: ~30 Tgas
     def withdraw(self):
-        """Users can withdraw winnings or refunds after game ends"""
+        """Users can withdraw winnings or refunds after game ends - FIXED VERSION"""
         self.assert_not_paused()
         user_id = self.predecessor_account_id
 
@@ -391,7 +487,6 @@ class TeamBettingContract(Contract):
         # Return the promise for proper transaction handling
         return transfer_promise
 
-
     # View functions
     @view  # TGAS: ~5 Tgas
     def get_game_status(self) -> Dict:
@@ -406,6 +501,8 @@ class TeamBettingContract(Contract):
             "game_duration": self.storage.get("game_duration", 3600),
             "team_a_points": self.storage.get("team_a_points", 0),
             "team_b_points": self.storage.get("team_b_points", 0),
+            "team_a_total_amount": self.storage.get("team_a_total_amount", 0),
+            "team_b_total_amount": self.storage.get("team_b_total_amount", 0),
             "winning_team": self.storage.get("winning_team", "")
         }
 
@@ -428,6 +525,12 @@ class TeamBettingContract(Contract):
     def calculate_current_points(self, amount_near: int) -> int:
         if not self.storage.get("game_active"):
             return 0
+        
+        if not self.storage.get("game_started"):
+            # Before timer starts - early bird rate
+            return amount_near * EARLY_BIRD_RATE
+        
+        # After timer starts - hourly decay
         time_elapsed = self.block_timestamp - self.storage.get("game_start_time", 0)
         hours_elapsed = time_elapsed // (60 * 60 * 1000000000)
         if hours_elapsed >= len(self.storage.get("point_rates", [])):
