@@ -19,9 +19,10 @@ class TeamBettingContract(Contract):
     """
 
     @init  # TGAS: ~5 Tgas
-    def initialize(self, admin_id: str):
+    def initialize(self, admin_id: str, timer_bot_id: Optional[str] = None):
         """Initialize the contract with admin"""
         self.storage["admin"] = admin_id
+        self.storage["timer_bot"] = timer_bot_id if timer_bot_id else ""
         self.storage["game_active"] = False       # betting open?
         self.storage["game_started"] = False      # timer running?
         self.storage["game_start_time"] = 0
@@ -43,9 +44,16 @@ class TeamBettingContract(Contract):
 
     def assert_admin(self):
         """Ensure only admin can call this function"""
+        caller = self.predecessor_account_id
         admin = self.storage.get("admin")
-        if self.predecessor_account_id != admin:
-            raise Exception("Only admin can call this function")
+        if caller != admin:
+            raise Exception("Only admin function")
+    
+    def assert_timer_bot(self):
+        caller = self.predecessor_account_id
+        timer_bot = self.storage.get("timer_bot", "")
+        if caller != timer_bot:
+            raise Exception("Only timer bot can call this function")
 
     def assert_not_paused(self):
         """Ensure contract is not paused"""
@@ -355,13 +363,14 @@ class TeamBettingContract(Contract):
     # -------------------------------------------------
     @call  # TGAS: ~80 Tgas
     def end_game(self):
-        """Admin ends the game and triggers payouts - now requires timer to have started"""
-        self.assert_admin()
-        self.assert_not_paused()
-        if not self.storage.get("game_active"):
-            raise Exception("No active game")
-        if not self.storage.get("game_started"):
-            raise Exception("Timer has not started yet - cannot end game")
+        caller = self.predecessor_account_id
+        admin = self.storage.get("admin")
+        timer_bot = self.storage.get("timer_bot", "")
+        if caller != admin and caller != timer_bot:
+            raise Exception("Only admin or timer bot can call this function")
+
+    # ... rest of your end_game implementation ...
+
 
         team_a_points = self.storage.get("team_a_points", 0)
         team_b_points = self.storage.get("team_b_points", 0)
