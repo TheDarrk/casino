@@ -108,61 +108,38 @@ class TeamBettingContract(Contract):
         self.storage["paused"] = False
         self.log_event("game_unpaused", {"admin": self.predecessor_account_id})
 
-    @call  # TGAS: ~20 Tgas
-    def set_game_duration(self, duration_seconds: int):
-        """Admin sets game duration in seconds"""
-        self.assert_admin()
-        self.assert_not_paused()
-        if self.storage.get("game_active"):
-            raise Exception("Cannot change game duration during active game")
-        if duration_seconds < 60:
-            raise Exception("Game duration must be at least 60 seconds")
-        self.storage["game_duration"] = duration_seconds
-        self.log_event("game_duration_set", {"duration_seconds": duration_seconds})
-
-    @call  # TGAS: ~20 Tgas
-    def set_pot_size(self, pot_size: int):
-        """Admin sets the winning pot size in NEAR tokens"""
-        self.assert_admin()
-        self.assert_not_paused()
-        if self.storage.get("game_active"):
-            raise Exception("Cannot change pot size during active game")
-        self.storage["pot_size"] = pot_size
-        self.log_event("pot_size_set", {"pot_size": pot_size})
-
-    @call  # TGAS: ~20 Tgas
-    def set_commission_rate(self, rate: int):
-        """Admin sets commission rate (percentage)"""
-        self.assert_admin()
-        self.assert_not_paused()
-        if self.storage.get("game_active"):
-            raise Exception("Cannot change commission rate during active game")
-        if rate < 0 or rate > 50:
-            raise Exception("Commission rate must be between 0 and 50 percent")
-        self.storage["commission_rate"] = rate
-        self.log_event("commission_rate_set", {"rate": rate})
-
-    # -------------------------------------------------
-    # NEW: UPDATED GAME START LOGIC
-    # -------------------------------------------------
-    @call  # TGAS: ~30 Tgas
-    def start_game(self):
+    @call  # TGAS: ~40 Tgas (approximate combined gas)
+    def start_game(self, pot_size: int, game_duration: int, commission_rate: int):
         """
-        Admin opens the game for betting. The timer is NOT started yet.
-        Timer starts automatically when both teams reach pot+commission threshold
-        or manually by admin using start_timer()
+        Admin sets game parameters and starts the game.
+        Args:
+            pot_size (int): Winning pot size in NEAR tokens (must be > 0)
+            game_duration (int): Game duration in seconds (must be >= 60)
+            commission_rate (int): Commission rate in percent (0 to 50)
         """
         self.assert_admin()
         self.assert_not_paused()
+
         if self.storage.get("game_active"):
             raise Exception("Game already active")
-        pot_size = self.storage.get("pot_size", 0)
-        if pot_size <= 0:
-            raise Exception("Pot size must be set first")
 
-        # Reset game state
+        if pot_size <= 0:
+            raise Exception("Pot size must be greater than zero")
+
+        if game_duration < 60:
+            raise Exception("Game duration must be at least 60 seconds")
+
+        if commission_rate < 0 or commission_rate > 50:
+            raise Exception("Commission rate must be between 0 and 50 percent")
+
+        # Store game settings
+        self.storage["pot_size"] = pot_size
+        self.storage["game_duration"] = game_duration
+        self.storage["commission_rate"] = commission_rate
+
+        # Reset game state to start fresh
         self.storage["game_active"] = True
-        self.storage["game_started"] = False        # Timer not started yet
+        self.storage["game_started"] = False  # Timer not started yet
         self.storage["game_start_time"] = 0
         self.storage["force_refund_mode"] = False
         self.storage["team_a_bets"] = {}
@@ -176,23 +153,22 @@ class TeamBettingContract(Contract):
 
         self.log_event("game_opened", {
             "pot_size": pot_size,
-            "commission_rate": self.storage.get("commission_rate", 10),
-            "early_bird_rate": EARLY_BIRD_RATE
+            "commission_rate": commission_rate,
+            "early_bird_rate": EARLY_BIRD_RATE,
+            "game_duration": game_duration,
         })
 
+    # The below functions are unchanged from your original code.
     @call  # TGAS: ~15 Tgas
     def start_timer(self):
-        """
-        Admin can manually start the timer at any time after betting is open
-        """
         self.assert_admin()
         self.assert_not_paused()
         if not self.storage.get("game_active"):
             raise Exception("Game not active")
         if self.storage.get("game_started"):
             raise Exception("Timer already started")
-
         self._start_timer_internal("manual")
+
 
     # -------------------------------------------------
     # UPDATED BETTING LOGIC
