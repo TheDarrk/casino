@@ -28,7 +28,7 @@ class TeamBettingContract(Contract):
         self.storage["game_start_time"] = 0
         self.storage["pot_size"] = 0
         self.storage["commission_rate"] = 10      # 10% default
-        self.storage["game_duration"] = 3600      # 1 hour default (in seconds)
+        self.storage["game_duration"] = 86400      # 1 hour default (in seconds)
         self.storage["paused"] = False
         self.storage["force_refund_mode"] = False
         self.storage["banned_players"] = {}       # Track banned players
@@ -40,7 +40,7 @@ class TeamBettingContract(Contract):
         self.storage["team_b_total_amount"] = 0
         self.storage["winning_team"] = ""
         self.storage["withdrawable"] = {}         # Track how much each user can withdraw
-        self.storage["point_rates"] = [24, 23, 22, 21, 20, 19, 18, 17, 16, 15]  # Points per NEAR for each hour
+        self.storage["point_rates"] = [24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5]  # Points per NEAR for each hour
 
     def assert_admin(self):
         """Ensure only admin can call this function"""
@@ -126,15 +126,11 @@ class TeamBettingContract(Contract):
         if pot_size <= 0:
             raise Exception("Pot size must be greater than zero")
 
-        if game_duration < 60:
-            raise Exception("Game duration must be at least 60 seconds")
-
         if commission_rate < 0 or commission_rate > 50:
             raise Exception("Commission rate must be between 0 and 50 percent")
 
         # Store game settings
         self.storage["pot_size"] = pot_size
-        self.storage["game_duration"] = game_duration
         self.storage["commission_rate"] = commission_rate
 
         # Reset game state to start fresh
@@ -155,7 +151,7 @@ class TeamBettingContract(Contract):
             "pot_size": pot_size,
             "commission_rate": commission_rate,
             "early_bird_rate": EARLY_BIRD_RATE,
-            "game_duration": game_duration,
+            "game_duration": 86400,
         })
 
     # The below functions are unchanged from your original code.
@@ -211,7 +207,7 @@ class TeamBettingContract(Contract):
             else:
                 point_rate = self.storage.get("point_rates", [])[int(hours_elapsed)]
 
-        points_earned = (bet_amount // ONE_NEAR) * point_rate
+        points_earned = (bet_amount * point_rate) // ONE_NEAR
 
         # -------- STORAGE UPDATE --------
         team_key = f"team_{team.lower()}_bets"
