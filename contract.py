@@ -28,7 +28,7 @@ class TeamBettingContract(Contract):
         self.storage["game_start_time"] = 0
         self.storage["pot_size"] = 0
         self.storage["commission_rate"] = 10      # 10% default
-        self.storage["game_duration"] = 86400      # 1 hour default (in seconds)
+        self.storage["game_duration"] = 86400      # 24 hour default (in seconds)
         self.storage["paused"] = False
         self.storage["force_refund_mode"] = False
         self.storage["banned_players"] = {}       # Track banned players
@@ -181,6 +181,13 @@ class TeamBettingContract(Contract):
         self.assert_not_banned(user_id)
         if not self.storage.get("game_active"):
             raise Exception("No active game")
+        if self.storage.get("game_started"):
+    start_time = self.storage.get("game_start_time", 0)
+    duration = self.storage.get("game_duration", 0)  # in seconds
+    # block_timestamp is in nanoseconds, convert duration to nanoseconds
+            if self.block_timestamp > start_time + duration * 1_000_000_000:
+                raise Exception("Game duration has ended, betting is closed.")
+
         if self.storage.get("force_refund_mode", False):
             raise Exception("Game is in refund mode - betting disabled")
         if team not in ["A", "B"]:
@@ -203,7 +210,7 @@ class TeamBettingContract(Contract):
             time_elapsed = self.block_timestamp - self.storage.get("game_start_time", 0)
             hours_elapsed = time_elapsed // (60 * 60 * 1000000000)  # nanoseconds to hours
             if hours_elapsed >= len(self.storage.get("point_rates", [])):
-                point_rate = 1
+                point_rate = 4
             else:
                 point_rate = self.storage.get("point_rates", [])[int(hours_elapsed)]
 
