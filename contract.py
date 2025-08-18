@@ -109,7 +109,7 @@ class TeamBettingContract(Contract):
         self.log_event("game_unpaused", {"admin": self.predecessor_account_id})
 
     @call  # TGAS: ~40 Tgas (approximate combined gas)
-    def start_game(self, pot_size: int, game_duration: int, commission_rate: int):
+    def start_game(self, pot_size: int, commission_rate: int):
         """
         Admin sets game parameters and starts the game.
         Args:
